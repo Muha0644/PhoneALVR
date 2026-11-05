@@ -3,8 +3,7 @@
 ## What this is
 
 PhoneALVR is a new Android VR client for a stock **ALVR v20.14.1** streamer.
-ALVR's PC streamer is the TCP client; the phone advertises and listens. The
-phone never dials the PC.
+ALVR's PC streamer is the TCP client; the phone advertises and listens.
 
 Do **not** copy the architecture of `../PhoneVR` (C++ glue, Cardboard AAR,
 GLSurfaceView Java GL loop, committed ALVR submodule). Reuse its protocol

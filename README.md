@@ -19,7 +19,7 @@ implemented in this repository.
 ## What it does
 
 - The phone advertises itself as an ALVR client and **listens**. ALVR's PC
-  streamer is the TCP client; the phone never dials the PC.
+  streamer is the TCP client.
 - Decoded H.264/HEVC/AV1 frames from ALVR's MediaCodec decoder go directly to
   an `AHardwareBuffer` → `EGLImage` → GL external texture (zero-copy).
 - A stereo distortion mesh is generated from a Cardboard-compatible viewer

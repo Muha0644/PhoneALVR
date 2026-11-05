@@ -382,8 +382,7 @@ Targets are for a mid-range arm64 phone at 72–90 Hz, with a healthy Wi-Fi 5/6 
 - **ALVR-7.** Fail fast and clearly on protocol/version mismatch during the server-initiated
   handshake; never silently hang.
 - **ALVR-8.** Do not bundle ALVR server components or SteamVR/OpenVR binaries.
-- **ALVR-9.** Treat the phone as the TCP listener: it advertises and accepts connections; it never
-  dials the streamer.
+- **ALVR-9.** Treat the phone as the TCP listener: it advertises and accepts connections.
 
 ---
 

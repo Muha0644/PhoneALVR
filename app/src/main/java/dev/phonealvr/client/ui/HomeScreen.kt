@@ -319,10 +319,6 @@ private fun WaitingCard(network: NetworkInfo, state: SessionUiState, onCopy: () 
         },
         style = MaterialTheme.typography.bodySmall,
       )
-      Text(
-        "PhoneALVR never dials the PC: ALVR's streamer connects to this phone.",
-        style = MaterialTheme.typography.bodySmall,
-      )
     }
   }
 }
@@ -336,19 +332,14 @@ private fun OnboardingCard() {
       Text("First time?", style = MaterialTheme.typography.titleMedium)
       Text(
         "1. Install ALVR on your PC and start it.\n" +
-          "2. Put the phone in the same Wi-Fi network (or connect USB with ADB).\n" +
-          "3. Press Start waiting. ALVR connects to the phone; the phone never dials the PC.\n" +
-          "4. In ALVR, trust the new device and choose your stream settings.\n" +
-          "5. Put the phone in a Cardboard viewer and press Open VR when streaming starts.",
+        "2. Put the phone in the same Wi-Fi network (or connect USB with ADB).\n" +
+        "3. Press Start waiting. ALVR connects to the phone.\n" +
+        "4. In ALVR, trust the new device and choose your stream settings.\n" +
+        "5. Put the phone in a viewer and press Open VR when streaming starts.",
       )
       Text(
         "Wired mode: set ALVR → Connection → Wired Client Type → Custom to " +
           "dev.phonealvr.client (the debug build uses dev.phonealvr.client.debug).",
-        style = MaterialTheme.typography.bodySmall,
-      )
-      Text(
-        "For long sessions, set Android Settings → Apps → PhoneALVR → Battery to " +
-          "Unrestricted so the vendor power manager does not kill the listener.",
         style = MaterialTheme.typography.bodySmall,
       )
     }
