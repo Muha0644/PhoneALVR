@@ -11,5 +11,5 @@ pub mod texture;
 #[cfg(target_os = "android")]
 pub mod egl;
 
-pub use renderer::{FrameParams, RenderError, StereoRenderer, TextureKind};
+pub use renderer::{FoveatedShaderParams, FrameParams, RenderError, StereoRenderer, TextureKind};
 pub use texture::ExternalTexture;

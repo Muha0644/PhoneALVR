@@ -63,6 +63,7 @@ extern "C" {
         context: EglContextHandle,
     ) -> u32;
     fn eglSwapBuffers(display: EglDisplay, surface: EglSurface) -> u32;
+    fn eglSwapInterval(display: EglDisplay, interval: EglInt) -> u32;
     fn eglDestroySurface(display: EglDisplay, surface: EglSurface) -> u32;
     fn eglDestroyContext(display: EglDisplay, context: EglContextHandle) -> u32;
     fn eglTerminate(display: EglDisplay) -> u32;
@@ -179,6 +180,15 @@ impl EglContext {
     pub fn swap_buffers(&self) {
         unsafe {
             eglSwapBuffers(self.display, self.surface);
+        }
+    }
+
+    /// Ask `eglSwapBuffers` to block until the next vsync. The render loop is
+    /// driven by this instead of a second software timer, which would otherwise
+    /// halve the frame rate by waiting for two vsyncs per frame.
+    pub fn set_swap_interval(&self, interval: i32) {
+        unsafe {
+            eglSwapInterval(self.display, interval);
         }
     }
 

@@ -235,12 +235,17 @@ pub extern "system" fn Java_dev_phonealvr_client_NativeSession_nativePushOrienta
     z: jfloat,
     w: jfloat,
     timestamp_ns: jlong,
+    display_rotation: jint,
 ) {
     if !(x.is_finite() && y.is_finite() && z.is_finite() && w.is_finite()) {
         return;
     }
+    let orientation = phonealvr_core::android_orientation_to_openvr(
+        Quat::new(x, y, z, w),
+        display_rotation.clamp(0, 3) as u8,
+    );
     let sample = ImuSample {
-        orientation: Quat::new(x, y, z, w),
+        orientation,
         timestamp_ns: timestamp_ns.max(0) as u64,
     };
     let pose = runtime_mut(None, |runtime| {

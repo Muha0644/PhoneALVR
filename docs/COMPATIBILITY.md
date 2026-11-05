@@ -51,9 +51,10 @@ larger than the panel.
 - 3DoF only. No 6DoF, controllers, hand/eye tracking or microphone passthrough.
 - No Vulkan renderer; GLES 3.0 only.
 - No compatibility shim for ALVR releases other than v20.14.1.
-- Foveated encoding is required for the target phone, but the **renderer shader
-  hookup is still pending**. The math/config groundwork is implemented; the
-  client currently advertises no foveation until that is verified.
+- Foveated encoding is required for the target phone. The math/config,
+  decoder sizing and renderer shader hookup are implemented, but the client
+  still advertises no foveation until the shader path is verified on a
+  physical device.
 - 10-bit and HDR are not negotiated in v1; the client advertises 8-bit SDR.
   Upscaling settings are accepted but ignored.
 - The target phone's H.264 decoder appears to max out near 1920 px encoded

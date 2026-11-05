@@ -27,8 +27,10 @@ use jni::JNIEnv;
 use phonealvr_core::{Action, Quat, Settings};
 use phonealvr_render::egl::EglContext;
 use phonealvr_render::texture::create_external_texture;
-use phonealvr_render::{ExternalTexture, FrameParams, StereoRenderer, TextureKind};
-use phonealvr_viewer::{build_eye_mesh, EyeMapper};
+use phonealvr_render::{
+    ExternalTexture, FoveatedShaderParams, FrameParams, StereoRenderer, TextureKind,
+};
+use phonealvr_viewer::{build_eye_mesh, EyeMapper, FoveatedConfig, FoveatedEncoding};
 use std::{
     cell::RefCell,
     ffi::c_void,
@@ -43,9 +45,17 @@ use std::{
 const MESH_COLUMNS: u32 = 40;
 const MESH_ROWS: u32 = 32;
 
+/// Active decoder together with the exact configuration it was built from.
+///
+/// ALVR resends the decoder config on every keyframe. MediaCodec and its
+/// ImageReader must only be recreated when the configuration actually
+/// changes, otherwise every resend leaks an image reader and the decoder
+/// collapses into a saturation death spiral.
+type DecoderSlot = Arc<Mutex<Option<(VideoDecoderConfig, VideoDecoderSource)>>>;
+
 struct AlvrState {
     context: Arc<ClientCoreContext>,
-    decoder: Arc<Mutex<Option<VideoDecoderSource>>>,
+    decoder: DecoderSlot,
     running: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -67,6 +77,9 @@ static STREAM_VIEW_WIDTH: AtomicU32 = AtomicU32::new(0);
 static STREAM_VIEW_HEIGHT: AtomicU32 = AtomicU32::new(0);
 static FIRST_FRAME_LOGGED: AtomicBool = AtomicBool::new(false);
 static VIDEO_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
+static VIDEO_NAL_COUNT: AtomicU64 = AtomicU64::new(0);
+static VIDEO_FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
+static VIDEO_LAST_TIMESTAMP_NS: AtomicU64 = AtomicU64::new(0);
 
 fn alvr_slot() -> &'static Mutex<Option<AlvrState>> {
     ALVR.get_or_init(|| Mutex::new(None))
@@ -138,7 +151,7 @@ pub fn initialize(display: DisplayInfo) -> Result<(), String> {
     context.resume();
 
     let running = Arc::new(AtomicBool::new(true));
-    let decoder: Arc<Mutex<Option<VideoDecoderSource>>> = Arc::new(Mutex::new(None));
+    let decoder: DecoderSlot = Arc::new(Mutex::new(None));
 
     let event_thread = spawn_event_thread(
         Arc::clone(&context),
@@ -224,6 +237,11 @@ struct RenderState {
     tan_half_horizontal: f32,
     tan_half_vertical: f32,
     stream_texture: Option<glow::Texture>,
+    rendered_frames: u32,
+    last_fps_log_ns: u64,
+    last_video_frames: u64,
+    last_video_drops: u64,
+    warned_about_pacing: bool,
 }
 
 thread_local! {
@@ -255,6 +273,7 @@ pub fn surface_created(env: &mut JNIEnv, surface: &JObject) -> bool {
         }
     };
 
+    egl.set_swap_interval(1);
     let gl = unsafe { glow::Context::from_loader_function(|name| EglContext::glow_loader(name)) };
     let mut renderer = match StereoRenderer::new(&gl) {
         Ok(renderer) => renderer,
@@ -270,11 +289,15 @@ pub fn surface_created(env: &mut JNIEnv, surface: &JObject) -> bool {
         .as_ref()
         .map(|runtime| runtime.profile().clone())
         .unwrap_or_default();
+    let foveated = lock_runtime()
+        .as_ref()
+        .and_then(|runtime| runtime.foveated_encoding());
     let mapper = EyeMapper::from_profile(&profile);
     let mesh = build_eye_mesh(&mapper, MESH_COLUMNS, MESH_ROWS);
     if let Err(error) = renderer.upload_mesh(&gl, &mesh) {
         log::error!("mesh upload failed: {error}");
     }
+    renderer.set_foveated(foveated.map(FoveatedShaderParams::from));
     let tan = profile.fov.tan_extents();
     let stream_texture = create_external_texture(&gl);
     MESH_DIRTY.store(false, Ordering::Relaxed);
@@ -295,6 +318,11 @@ pub fn surface_created(env: &mut JNIEnv, surface: &JObject) -> bool {
             tan_half_horizontal: (tan.right - tan.left) * 0.5,
             tan_half_vertical: (tan.top - tan.bottom) * 0.5,
             stream_texture,
+            rendered_frames: 0,
+            last_fps_log_ns: 0,
+            last_video_frames: 0,
+            last_video_drops: 0,
+            warned_about_pacing: false,
         });
     });
 
@@ -348,15 +376,26 @@ pub fn render_frame() {
         }
 
         if MESH_DIRTY.swap(false, Ordering::Relaxed) {
-            let profile = lock_runtime()
-                .as_ref()
-                .map(|runtime| runtime.profile().clone())
-                .unwrap_or_default();
+            let (profile, foveated) = {
+                let guard = lock_runtime();
+                (
+                    guard
+                        .as_ref()
+                        .map(|runtime| runtime.profile().clone())
+                        .unwrap_or_default(),
+                    guard
+                        .as_ref()
+                        .and_then(|runtime| runtime.foveated_encoding()),
+                )
+            };
             let mapper = EyeMapper::from_profile(&profile);
             let mesh = build_eye_mesh(&mapper, MESH_COLUMNS, MESH_ROWS);
             if let Err(error) = state.renderer.upload_mesh(&state.gl, &mesh) {
                 log::error!("mesh upload failed: {error}");
             }
+            state
+                .renderer
+                .set_foveated(foveated.map(FoveatedShaderParams::from));
             let tan = profile.fov.tan_extents();
             state.tan_half_horizontal = (tan.right - tan.left) * 0.5;
             state.tan_half_vertical = (tan.top - tan.bottom) * 0.5;
@@ -370,7 +409,7 @@ pub fn render_frame() {
                         .decoder
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    match source.as_mut().and_then(|source| source.get_frame()) {
+                    match source.as_mut().and_then(|(_, source)| source.get_frame()) {
                         Some((timestamp, buffer)) => {
                             // Report compositor start before drawing so ALVR
                             // can return the head pose it used for this frame.
@@ -385,11 +424,10 @@ pub fn render_frame() {
         };
 
         let Some((timestamp, buffer_ptr)) = frame else {
-            unsafe {
-                state.gl.clear_color(0.0, 0.0, 0.0, 1.0);
-                state.gl.clear(glow::COLOR_BUFFER_BIT);
-            }
-            state.egl.swap_buffers();
+            // Nothing new to present. Keep the previous frame on screen and
+            // poll again shortly; swapping an empty frame would both flicker
+            // and wait for an extra vsync.
+            std::thread::sleep(Duration::from_millis(1));
             return;
         };
 
@@ -461,13 +499,40 @@ pub fn render_frame() {
             return;
         }
 
-        state.egl.set_presentation_time(boot_time_ns() + 11_000_000);
         state.egl.swap_buffers();
 
         if let Some(alvr) = alvr_lock().as_ref() {
             alvr.context.report_submit(timestamp, Duration::ZERO);
         }
         let now_ns = boot_time_ns();
+        state.rendered_frames += 1;
+        if state.last_fps_log_ns == 0 {
+            state.last_fps_log_ns = now_ns;
+            state.last_video_frames = VIDEO_FRAME_COUNT.load(Ordering::Relaxed);
+            state.last_video_drops = VIDEO_DROP_COUNT.load(Ordering::Relaxed);
+        } else {
+            let elapsed = now_ns.saturating_sub(state.last_fps_log_ns);
+            if elapsed >= 5_000_000_000 {
+                let fps_out = state.rendered_frames as f64 * 1e9 / elapsed as f64;
+                let video_frames = VIDEO_FRAME_COUNT.load(Ordering::Relaxed);
+                let drops = VIDEO_DROP_COUNT.load(Ordering::Relaxed);
+                let fps_in = (video_frames - state.last_video_frames) as f64 * 1e9 / elapsed as f64;
+                let drop_delta = drops.saturating_sub(state.last_video_drops);
+                log::info!(
+                    "render: {fps_out:.1} fps, video in: {fps_in:.1} fps, dropped packets: {drop_delta}"
+                );
+                if fps_in > 75.0 && !state.warned_about_pacing {
+                    log::warn!(
+                        "video input is {fps_in:.0} fps: enable ALVR Video -> Enforce server frame pacing (or cap the game/SteamVR to 60 fps)"
+                    );
+                    state.warned_about_pacing = true;
+                }
+                state.rendered_frames = 0;
+                state.last_fps_log_ns = now_ns;
+                state.last_video_frames = video_frames;
+                state.last_video_drops = drops;
+            }
+        }
         let frame_ns = timestamp.as_nanos().min(u64::MAX as u128) as u64;
         let latency_ms = now_ns.saturating_sub(frame_ns) as f32 / 1_000_000.0;
         if let Some(runtime) = lock_runtime().as_mut() {
@@ -495,7 +560,7 @@ pub fn on_orientation(orientation: Quat) {
 
 fn spawn_event_thread(
     context: Arc<ClientCoreContext>,
-    decoder: Arc<Mutex<Option<VideoDecoderSource>>>,
+    decoder: DecoderSlot,
     running: Arc<AtomicBool>,
 ) -> JoinHandle<()> {
     thread::Builder::new()
@@ -511,27 +576,34 @@ fn spawn_event_thread(
         .expect("failed to spawn event thread")
 }
 
-fn handle_event(
-    context: &Arc<ClientCoreContext>,
-    decoder: &Arc<Mutex<Option<VideoDecoderSource>>>,
-    event: ClientCoreEvent,
-) {
+fn handle_event(context: &Arc<ClientCoreContext>, decoder: &DecoderSlot, event: ClientCoreEvent) {
     match event {
         ClientCoreEvent::StreamingStarted(stream) => {
-            let width = stream.negotiated_config.view_resolution.x;
-            let height = stream.negotiated_config.view_resolution.y;
+            let base_width = stream.negotiated_config.view_resolution.x;
+            let base_height = stream.negotiated_config.view_resolution.y;
             let refresh = stream.negotiated_config.refresh_rate_hint;
-            log::info!("streaming started: {width}x{height} @ {refresh} Hz");
-            STREAM_VIEW_WIDTH.store(width, Ordering::Release);
-            STREAM_VIEW_HEIGHT.store(height, Ordering::Release);
+            let foveated = foveated_encoding_for_stream(&stream);
+            let [encoded_width, encoded_height] = foveated
+                .map(|encoding| encoding.encoded_view_resolution())
+                .unwrap_or([base_width, base_height]);
+            log::info!(
+                "streaming started: {base_width}x{base_height} per eye @ {refresh} Hz, foveated={} encoded={encoded_width}x{encoded_height}",
+                foveated.is_some()
+            );
+            // The decoder receives the foveated (smaller) texture. The
+            // renderer still displays the base per-eye resolution and expands
+            // it through the FFE UV map.
+            STREAM_VIEW_WIDTH.store(encoded_width, Ordering::Release);
+            STREAM_VIEW_HEIGHT.store(encoded_height, Ordering::Release);
             let bitrate = bitrate_mbps_from_settings(&stream.settings);
             if let Some(runtime) = lock_runtime().as_mut() {
                 let native = runtime.display().native_per_eye();
                 runtime.on_handshake_succeeded(20);
-                runtime.on_stream_started(width, height, refresh, 20);
-                if width > native.width || height > native.height {
+                runtime.on_stream_started(base_width, base_height, refresh, 20);
+                runtime.set_foveated_encoding(foveated);
+                if base_width > native.width || base_height > native.height {
                     let warning = format!(
-                        "Stream {width}x{height} per eye exceeds the panel's {native_width}x{native_height}. Set ALVR Video → Resolution to Scale 1.0 or lower.",
+                        "Stream {base_width}x{base_height} per eye exceeds the panel's {native_width}x{native_height}. Set ALVR Video → Resolution to Scale 1.0 or lower.",
                         native_width = native.width,
                         native_height = native.height,
                     );
@@ -542,6 +614,9 @@ fn handle_event(
                     runtime.stats_mut().set_bitrate_mbps(bitrate);
                 }
             }
+            // Refresh the mesh pass so the render thread picks up the FFE
+            // constants even when the profile itself did not change.
+            MESH_DIRTY.store(true, Ordering::Relaxed);
         }
         ClientCoreEvent::StreamingStopped => {
             log::info!("streaming stopped");
@@ -553,29 +628,20 @@ fn handle_event(
             if let Some(runtime) = lock_runtime().as_mut() {
                 runtime.on_stream_stopped();
             }
+            MESH_DIRTY.store(true, Ordering::Relaxed);
         }
         ClientCoreEvent::DecoderConfig { codec, config_nal } => {
             let codec_name = format!("{codec:?}").to_lowercase();
             let view_width = STREAM_VIEW_WIDTH.load(Ordering::Acquire);
             let view_height = STREAM_VIEW_HEIGHT.load(Ordering::Acquire);
-            let profile = h264_profile_name(&config_nal);
-            if matches!(profile, "high10" | "high422" | "high444") {
-                if let Some(runtime) = lock_runtime().as_mut() {
-                    runtime.on_error(format!(
-                        "unsupported H.264 profile {profile}; disable 10-bit/HDR in ALVR"
-                    ));
-                }
+            // A config event can arrive after `StreamingStopped`, which clears
+            // the view size. Do not build a decoder with ALVR's placeholder
+            // dimensions for a stream that is no longer active.
+            if view_width == 0 || view_height == 0 {
+                log::debug!("ignoring decoder config outside an active stream");
+                return;
             }
-            log::info!(
-                "decoder config: {codec_name}, {} bytes, H.264 profile {}, csd {:02x?}, view {}x{} (encoded {}x{})",
-                config_nal.len(),
-                h264_profile_name(&config_nal),
-                config_nal,
-                view_width,
-                view_height,
-                view_width * 2,
-                view_height
-            );
+            let profile = h264_profile_name(&config_nal);
 
             // ALVR's decoder uses 512x1024 placeholders and relies on the codec
             // reading the SPS. Some MediaTek/Qualcomm decoders need the real
@@ -607,9 +673,40 @@ fn handle_event(
                 config_buffer: config_nal,
             };
 
+            // The streamer resends the same config on keyframes. Keep the
+            // running decoder in that case: recreating it leaks the decoder's
+            // ImageReader and causes queue overflow plus saturation drops.
+            let mut slot = decoder
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if slot
+                .as_ref()
+                .is_some_and(|(active_config, _)| *active_config == config)
+            {
+                return;
+            }
+
+            if matches!(profile, "high10" | "high422" | "high444") {
+                if let Some(runtime) = lock_runtime().as_mut() {
+                    runtime.on_error(format!(
+                        "unsupported H.264 profile {profile}; disable 10-bit/HDR in ALVR"
+                    ));
+                }
+            }
+            log::info!(
+                "decoder config: {codec_name}, {} bytes, H.264 profile {}, csd {:02x?}, view {}x{} (encoded {}x{})",
+                config.config_buffer.len(),
+                h264_profile_name(&config.config_buffer),
+                config.config_buffer,
+                view_width,
+                view_height,
+                view_width * 2,
+                view_height
+            );
+
             let context_for_callback = Arc::clone(context);
             let (mut sink, source) =
-                video_decoder::create_decoder(config, move |result| match result {
+                video_decoder::create_decoder(config.clone(), move |result| match result {
                     Ok(timestamp) => context_for_callback.report_frame_decoded(timestamp),
                     Err(error) => {
                         context_for_callback.report_fatal_decoder_error(&error.to_string())
@@ -617,6 +714,11 @@ fn handle_event(
                 });
 
             context.set_decoder_input_callback(Box::new(move |timestamp, buffer| {
+                VIDEO_NAL_COUNT.fetch_add(1, Ordering::Relaxed);
+                let timestamp_ns = timestamp.as_nanos().min(u64::MAX as u128) as u64;
+                if VIDEO_LAST_TIMESTAMP_NS.swap(timestamp_ns, Ordering::Relaxed) != timestamp_ns {
+                    VIDEO_FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
                 let submitted = sink.push_nal(timestamp, buffer);
                 if !submitted {
                     VIDEO_DROP_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -624,9 +726,8 @@ fn handle_event(
                 submitted
             }));
 
-            *decoder
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(source);
+            *slot = Some((config, source));
+            drop(slot);
             if let Some(runtime) = lock_runtime().as_mut() {
                 runtime.stats_mut().set_codec(&codec_name);
             }
@@ -693,6 +794,31 @@ fn spawn_input_thread(context: Arc<ClientCoreContext>, running: Arc<AtomicBool>)
             }
         })
         .expect("failed to spawn input thread")
+}
+
+/// Extract the negotiated FFE layout from a `StreamingStarted` event.
+///
+/// The server only enables FFE in the negotiated config when both the server
+/// setting is on and the client advertised support (or `force_enable` is set).
+/// `negotiated_config.view_resolution` is the base per-eye resolution; the
+/// returned layout carries the smaller encoded per-eye size.
+fn foveated_encoding_for_stream(stream: &alvr_packets::StreamConfig) -> Option<FoveatedEncoding> {
+    if !stream.negotiated_config.enable_foveated_encoding {
+        return None;
+    }
+    let config = stream.settings.video.foveated_encoding.as_option()?;
+    let base = stream.negotiated_config.view_resolution;
+    Some(FoveatedEncoding::new(
+        [base.x, base.y],
+        FoveatedConfig {
+            center_size_x: config.center_size_x,
+            center_size_y: config.center_size_y,
+            center_shift_x: config.center_shift_x,
+            center_shift_y: config.center_shift_y,
+            edge_ratio_x: config.edge_ratio_x,
+            edge_ratio_y: config.edge_ratio_y,
+        },
+    ))
 }
 
 fn h264_profile_name(nal: &[u8]) -> &'static str {

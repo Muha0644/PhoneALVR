@@ -9,7 +9,7 @@ use phonealvr_core::{
     Action, Event, Fov, HeadTracker, ImuSample, Quat, Resolution, Session, SessionState, Settings,
     StatsTracker, ViewParamDedup, ViewParams,
 };
-use phonealvr_viewer::{EyeFov, ViewerProfile};
+use phonealvr_viewer::{EyeFov, FoveatedEncoding, ViewerProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplayInfo {
@@ -43,6 +43,7 @@ pub struct Runtime {
     dedup: ViewParamDedup,
     display: DisplayInfo,
     view_params: ViewParams,
+    foveated_encoding: Option<FoveatedEncoding>,
     first_tracking_sample: bool,
     last_error: Option<String>,
     hud_message: Option<String>,
@@ -62,6 +63,7 @@ impl Runtime {
             dedup: ViewParamDedup::default(),
             display,
             view_params,
+            foveated_encoding: None,
             first_tracking_sample: true,
             last_error: None,
             hud_message: None,
@@ -128,6 +130,7 @@ impl Runtime {
 
     pub fn on_stream_stopped(&mut self) -> Vec<Action> {
         self.dedup.invalidate();
+        self.foveated_encoding = None;
         self.session.handle(Event::StreamStopped)
     }
 
@@ -227,6 +230,18 @@ impl Runtime {
         self.display
     }
 
+    /// Record the negotiated foveated-encoding layout for the current stream,
+    /// or clear it when the stream is not foveated. The layout carries the
+    /// smaller encoded per-eye size used by the decoder and the UV mapping
+    /// constants used by the renderer.
+    pub fn set_foveated_encoding(&mut self, encoding: Option<FoveatedEncoding>) {
+        self.foveated_encoding = encoding;
+    }
+
+    pub fn foveated_encoding(&self) -> Option<FoveatedEncoding> {
+        self.foveated_encoding
+    }
+
     pub fn effective_view_resolution(&self) -> Resolution {
         self.settings
             .effective_view_resolution(self.display.native_per_eye())
@@ -262,6 +277,17 @@ impl Runtime {
             .as_deref()
             .map(serde_json::Value::from)
             .unwrap_or(serde_json::Value::Null);
+        if let Some(encoding) = self.foveated_encoding {
+            if let Some(stream) = value
+                .get_mut("stream")
+                .and_then(|value| value.as_object_mut())
+            {
+                let [width, height] = encoding.encoded_view_resolution();
+                stream.insert("foveated".into(), true.into());
+                stream.insert("encoded_view_width".into(), width.into());
+                stream.insert("encoded_view_height".into(), height.into());
+            }
+        }
         value.to_string()
     }
 
@@ -368,6 +394,35 @@ mod tests {
         runtime.on_stream_started(1184, 1056, 90.0, 20);
         assert!(runtime.is_streaming());
         assert!(runtime.status_json().contains("\"streaming\""));
+    }
+
+    #[test]
+    fn foveated_encoding_is_stream_scoped() {
+        let mut runtime = runtime();
+        runtime.start();
+        runtime.on_server_connected("p");
+        runtime.on_handshake_started();
+        runtime.on_stream_started(1184, 1056, 90.0, 20);
+        assert!(runtime.foveated_encoding().is_none());
+
+        runtime.set_foveated_encoding(Some(FoveatedEncoding::new(
+            [1184, 1056],
+            phonealvr_viewer::FoveatedConfig::default(),
+        )));
+        let encoding = runtime.foveated_encoding().expect("foveated encoding");
+        assert_eq!(encoding.base_resolution, [1184, 1056]);
+        assert!(encoding.encoded_resolution[0] < 1184);
+        assert!(encoding.encoded_resolution[1] < 1056);
+
+        let status = runtime.status_json();
+        assert!(status.contains("\"foveated\":true"));
+        assert!(status.contains(&format!(
+            "\"encoded_view_width\":{}",
+            encoding.encoded_resolution[0]
+        )));
+
+        runtime.on_stream_stopped();
+        assert!(runtime.foveated_encoding().is_none());
     }
 
     #[test]

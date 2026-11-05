@@ -80,10 +80,12 @@ companion object with `@JvmStatic`.
 
 The target phone cannot decode the full side-by-side stream; foveated encoding
 is required. Read `docs/dev/FFE_HANDOFF.md` before touching the renderer.
-`viewer/src/foveated.rs` already ports the ALVR v20.14.1 math, and
+`viewer/src/foveated.rs` ports the ALVR v20.14.1 math,
 `native/src/platform_android.rs` uses the FFE encoded resolution for
-MediaCodec. The renderer shader hookup and enabling the client capability are
-the next vertical slice.
+MediaCodec, and `render/src/renderer.rs` applies the FFE UV remap after lens
+distortion and before the side-by-side half split. The next step is
+physical-device validation; only then flip `ClientCapabilities.foveated_encoding`
+from `false` to `true`.
 
 ## Tests first/with the change
 

@@ -1,5 +1,6 @@
 package dev.phonealvr.client
 
+import android.content.res.Configuration
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -22,7 +23,6 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import java.util.concurrent.locks.LockSupport
 import kotlinx.coroutines.launch
 
 /**
@@ -42,6 +42,7 @@ class VrActivity : ComponentActivity(), SurfaceHolder.Callback {
   private var refreshHz = 60f
   private lateinit var sensorManager: SensorManager
   private var rotationSensor: Sensor? = null
+  private var displayRotation = Surface.ROTATION_0
   private var settings = AppSettings()
 
   private val sensorListener =
@@ -57,6 +58,7 @@ class VrActivity : ComponentActivity(), SurfaceHolder.Callback {
           quaternion[3],
           quaternion[0],
           event.timestamp,
+          displayRotation,
         )
       }
 
@@ -66,6 +68,9 @@ class VrActivity : ComponentActivity(), SurfaceHolder.Callback {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     settings = SettingsStore.load(this)
+    requestedOrientation = settings.screenOrientation.activityOrientation(vr = true)
+    displayRotation = windowManager.defaultDisplay.rotation
+    Log.i(TAG, "display rotation $displayRotation")
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     window.attributes =
       window.attributes.apply { screenBrightness = settings.brightness.coerceIn(0.05f, 1f) }
@@ -126,8 +131,15 @@ class VrActivity : ComponentActivity(), SurfaceHolder.Callback {
     }
   }
 
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    displayRotation = windowManager.defaultDisplay.rotation
+    Log.i(TAG, "display rotation $displayRotation")
+  }
+
   override fun onResume() {
     super.onResume()
+    displayRotation = windowManager.defaultDisplay.rotation
     SessionRepository.startPolling()
     val sensor = rotationSensor
     if (sensor != null) {
@@ -250,18 +262,12 @@ class VrActivity : ComponentActivity(), SurfaceHolder.Callback {
       }
       Log.i(TAG, "nativeOnSurfaceCreated succeeded")
       NativeSession.nativeOnSurfaceChanged(width, height)
-      val periodNs = (1_000_000_000.0 / refreshHz).toLong().coerceAtLeast(1)
-      var next = System.nanoTime()
+      // `nativeRenderFrame` blocks in eglSwapBuffers until the next vsync when
+      // a new frame is presented. Do not add a second software pacer: waiting
+      // for both the timer and the vsync halves the consumption rate and
+      // backs up the decoder.
       while (running) {
-        val now = System.nanoTime()
-        if (now < next) {
-          LockSupport.parkNanos(next - now)
-        }
         NativeSession.nativeRenderFrame()
-        next += periodNs
-        if (next < System.nanoTime()) {
-          next = System.nanoTime() + periodNs
-        }
       }
       NativeSession.nativeOnSurfaceDestroyed()
       Log.i(TAG, "render thread exit")

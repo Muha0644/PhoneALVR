@@ -55,6 +55,7 @@ class NativeSession private constructor() {
       z: Float,
       w: Float,
       timestampNs: Long,
+      displayRotation: Int,
     )
 
     @JvmStatic external fun nativePollStatus(): String

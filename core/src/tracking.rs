@@ -143,6 +143,33 @@ impl Quat {
     }
 }
 
+/// Convert an Android `TYPE_ROTATION_VECTOR` quaternion into an OpenVR head
+/// pose.
+///
+/// Android reports the rotation from the device's natural (portrait) frame to
+/// an East-North-Up world frame. OpenVR expects a Y-up frame with forward along
+/// `-Z`. When the phone is mounted in landscape, the sensor frame is still the
+/// natural portrait frame, so the display rotation must be applied as well.
+/// `display_rotation` is `android.view.Surface.ROTATION_*` (0, 90, 180, 270)
+/// divided by 90.
+///
+/// With the screen facing the user's eyes, the displayed frame *is* the
+/// headset frame, so this maps the sensor into that frame.
+pub fn android_orientation_to_openvr(orientation: Quat, display_rotation: u8) -> Quat {
+    // `Surface.ROTATION_*` is the rotation of the drawn UI relative to the
+    // device, so the device-to-display rotation is a positive Z rotation.
+    let display = Quat::from_axis_angle(
+        Vec3::new(0.0, 0.0, 1.0),
+        (display_rotation.min(3) as f32) * std::f32::consts::FRAC_PI_2,
+    );
+    let enu_to_openvr =
+        Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), -std::f32::consts::FRAC_PI_2);
+    enu_to_openvr
+        .mul(orientation.normalize())
+        .mul(display.conjugate())
+        .normalize()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImuSample {
     pub orientation: Quat,
@@ -310,6 +337,42 @@ mod tests {
 
     fn yaw(angle: f32) -> Quat {
         Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), angle)
+    }
+
+    #[test]
+    fn android_portrait_upright_maps_to_openvr_identity() {
+        // Phone held upright in front of the user, screen facing them.
+        let device = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), FRAC_PI_2);
+        let head = android_orientation_to_openvr(device, 0);
+        assert!(head.angle_to(Quat::IDENTITY) < 1e-4, "{head:?}");
+    }
+
+    #[test]
+    fn android_landscape_rotations_map_to_openvr_identity() {
+        let base = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), FRAC_PI_2);
+        for (rotation, roll) in [(1u8, FRAC_PI_2), (3u8, -FRAC_PI_2)] {
+            let device = base.mul(Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), roll));
+            let head = android_orientation_to_openvr(device, rotation);
+            assert!(head.angle_to(Quat::IDENTITY) < 1e-4, "{rotation}: {head:?}");
+        }
+    }
+
+    #[test]
+    fn android_world_yaw_maps_to_openvr_yaw() {
+        let base = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), FRAC_PI_2);
+        let device = Quat::from_axis_angle(Vec3::new(0.0, 0.0, 1.0), FRAC_PI_2).mul(base);
+        let head = android_orientation_to_openvr(device, 0);
+        let expected = Quat::from_axis_angle(Vec3::new(0.0, 1.0, 0.0), FRAC_PI_2);
+        assert!(head.angle_to(expected) < 1e-4, "{head:?}");
+    }
+
+    #[test]
+    fn display_rotation_is_clamped() {
+        let device = Quat::from_axis_angle(Vec3::new(1.0, 0.0, 0.0), FRAC_PI_2);
+        assert_eq!(
+            android_orientation_to_openvr(device, 7),
+            android_orientation_to_openvr(device, 3)
+        );
     }
 
     #[test]

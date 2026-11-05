@@ -1,7 +1,9 @@
 # Foveated encoding (FFE) handoff
 
-Status: **math/config groundwork complete; renderer shader hookup is the next
-vertical slice.** Read this together with `docs/dev/HANDOFF.md`.
+Status: **math, config, decoder sizing and renderer shader hookup complete;
+physical-device validation is the next step.** The client still advertises
+`foveated_encoding: false` until that validation passes. Read this together
+with `docs/dev/HANDOFF.md`.
 
 ## Why this is the next priority
 
@@ -37,10 +39,25 @@ decoder cannot sustain the full side-by-side stream:
      per-eye resolution. This is what the MediaCodec width/height options use.
    - The decoder log now prints `foveated=true/false` and the encoded size.
 3. `ClientCapabilities.foveated_encoding` is still **false**. Do not flip it
-   until the shader hookup is done, otherwise the server will send a foveated
-   texture that the renderer samples as a normal image.
+   until the shader hookup is verified on the device, otherwise the server
+   will send a foveated texture that the renderer samples as a normal image.
+4. `render/src/renderer.rs` applies the FFE remap in both fragment shaders:
+   - `u_ffe_enabled` / `u_eye_index` plus the twelve `u_ffe_*` `vec2`
+     uniforms, ported from the ALVR `stream.wgsl` block.
+   - `to_source()` applies `ffe_map()` **after** the distortion-mesh UV and
+     reprojection shift, **before** `u_uv_scale`/`u_uv_offset` select the
+     side-by-side half.
+   - The right eye is mirrored before and after the mapping, matching
+     `FoveatedEncoding::map_eye_uv(1, ...)`.
+   - Zero `a_left`/`a_right` coefficients (degenerate `edge_ratio == 1`
+     layouts) fall back to the identity edge instead of dividing by zero.
+   - `StereoRenderer::set_foveated` stores the constants once per stream or
+     profile change; non-finite constants disable the remap.
+5. `native/src/platform_android.rs` extracts the negotiated layout in
+   `foveated_encoding_for_stream`, logs it, stores it in `Runtime`, and
+   uploads `FoveatedShaderParams` when the render thread refreshes the mesh.
 
-## Renderer hookup (next)
+## Renderer hookup (implemented)
 
 Files:
 
@@ -125,24 +142,20 @@ already implements the flip before and after the mapping.
 
 ### Pass FFE to the renderer
 
-Add a `FoveatedShaderParams` (all `[f32;2]`/`f32`, `Copy`) to `render` and
-either:
+`render::FoveatedShaderParams` (all `[f32;2]`, `Copy`) is built with
+`From<viewer::FoveatedEncoding>` and passed to
+`StereoRenderer::set_foveated(Option<FoveatedShaderParams>)` once per
+stream/profile change. `render()` sets `u_eye_index = eye` per eye; the
+constants are shared by both eyes and only the mirror differs. The constants
+do **not** change per frame.
 
-- `StereoRenderer::set_foveated(Option<FoveatedShaderParams>)`, set once per
-  stream/profile change, or
-- add `foveated: Option<FoveatedShaderParams>` to `FrameParams` (it is copied
-  per frame and causes no allocation).
-
-At `render()` time set `u_eye_index = eye`, and the per-eye uniforms once (the
-constants are the same for both eyes; only the mirror differs).
-
-`native/src/platform_android.rs` can read
-`runtime.foveated_encoding()` when it rebuilds the mesh and upload the
-constants alongside the mesh. The constants do **not** change per frame.
+`native/src/platform_android.rs` reads `runtime.foveated_encoding()` when it
+rebuilds the mesh. `StreamingStarted`/`StreamingStopped` mark the mesh dirty so
+the render thread refreshes the constants even when the profile is unchanged.
 
 ### Flip the capability
 
-After the shader is verified visually:
+After the shader is verified on the device:
 
 - Set `foveated_encoding: true` in `ClientCapabilities` in
   `native/src/platform_android.rs`.
@@ -164,7 +177,11 @@ After the shader is verified visually:
 
 ## Verification checklist
 
-1. Unit tests: `cargo test -p phonealvr-viewer`.
+Steps 2–6 are still pending: no device was attached during the shader-hookup
+change, so `ClientCapabilities.foveated_encoding` must remain `false`.
+
+1. Unit tests: `cargo test --workspace` (viewer FFE math + render shader
+   ordering/uniform tests). Done.
 2. Build a release-core APK, install, and set ALVR FFE to Enabled with the
    default parameters (center 0.45/0.4, shift 0.4/0.1, edge 4/5).
 3. Confirm log:

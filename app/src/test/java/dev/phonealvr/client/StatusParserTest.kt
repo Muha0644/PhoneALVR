@@ -39,6 +39,23 @@ class StatusParserTest {
   }
 
   @Test
+  fun parsesFoveatedStreamEncodedSize() {
+    val state =
+      StatusParser.parseStatus(
+        """
+                {"state":"streaming","state_label":"streaming",
+                 "stream":{"view_width":1184,"view_height":1056,"refresh_hz":90.0,"protocol":20,
+                           "foveated":true,"encoded_view_width":704,"encoded_view_height":672},
+                 "generation":8}
+                """
+          .trimIndent(),
+      )
+    assertEquals(true, state.stream?.foveated)
+    assertEquals(704, state.stream?.encodedWidth)
+    assertEquals(672, state.stream?.encodedHeight)
+  }
+
+  @Test
   fun parsesStats() {
     val stats =
       StatusParser.parseStats(

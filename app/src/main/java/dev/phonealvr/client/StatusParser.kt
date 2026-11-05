@@ -7,6 +7,9 @@ data class StreamUi(
   val height: Int,
   val refreshHz: Float,
   val protocol: Int,
+  val foveated: Boolean = false,
+  val encodedWidth: Int = 0,
+  val encodedHeight: Int = 0,
 )
 
 data class StatsUi(
@@ -54,6 +57,9 @@ object StatusParser {
           height = it.optInt("view_height"),
           refreshHz = it.optDouble("refresh_hz", 0.0).toFloat(),
           protocol = it.optInt("protocol"),
+          foveated = it.optBoolean("foveated", false),
+          encodedWidth = it.optInt("encoded_view_width"),
+          encodedHeight = it.optInt("encoded_view_height"),
         )
       }
     return SessionUiState(

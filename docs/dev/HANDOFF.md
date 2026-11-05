@@ -16,8 +16,10 @@ a renderer, viewer/distortion math, and a host test suite.
   side-by-side, lens distortion mesh, brightness/vignette/CA, 2D late-latching.
 - Current blocker: decoder overload at high encoded resolution. The phone can
   see SteamVR, but the stream is slow/glitchy/green and has hard-rebooted.
-- Foveated encoding is **obligatory**. The FFE math/config groundwork is done;
-  the renderer shader hookup is next. See `docs/dev/FFE_HANDOFF.md`.
+- Foveated encoding is **obligatory**. The FFE math, config, decoder sizing
+  and renderer shader hookup are done; physical-device validation is next.
+  `ClientCapabilities.foveated_encoding` is still `false` until then. See
+  `docs/dev/FFE_HANDOFF.md`.
 
 ## Last known device evidence
 
@@ -57,19 +59,20 @@ cmd.exe /c 'cd /d C:\Users\muha0644.LAPTOP-QV08RKD9\Documents\code\PhoneALVR && 
 
 ## Test/verification state
 
-- Rust host: 43 core + 15 native + 3 render + 40 viewer = **101 tests**.
+- Rust host: 43 core + 16 native + 6 render + 40 viewer = **105 tests**.
 - Android cross-check arm64/x86_64: passing.
 - Kotlin unit tests, Android Lint, Spotless, debug APK: passing.
 - No emulator/AVD available in the last environment.
-- Physical-device FFE validation is pending.
+- Physical-device FFE validation is pending (no device attached after the
+  shader hookup).
 
 ## Next tasks (priority order)
 
-1. **FFE renderer shader hookup** — `docs/dev/FFE_HANDOFF.md`.
-2. Enable/advertise `foveated_encoding: true` after the shader is verified.
-3. Device test with FFE at 60 Hz, 30–50 Mbps, release core; record FPS,
-   `Decoder saturation`, dropped packets and temperature.
-4. If FFE works, tune the distortion/FFE composition and add a checkerboard
+1. Device test with FFE at 60 Hz, 30–50 Mbps, release core; record FPS,
+   `Decoder saturation`, dropped packets and temperature. Confirm
+   `foveated=true` and an encoded size below the base resolution in the log.
+2. Enable/advertise `foveated_encoding: true` only after step 1 passes.
+3. If FFE works, tune the distortion/FFE composition and add a checkerboard
    validation scene.
 5. Remaining reliability/perf work:
    - EGLImage pool (currently one image create/destroy per frame).
@@ -82,8 +85,8 @@ cmd.exe /c 'cd /d C:\Users\muha0644.LAPTOP-QV08RKD9\Documents\code\PhoneALVR && 
 ## Things to be careful about
 
 - Do **not** enable FFE in `ClientCapabilities` before the shader mapping is
-  correct; the server will send a foveated layout that the current shader
-  samples as a normal image.
+  verified on the device; the server will send a foveated layout that the
+  current shader samples as a normal image.
 - The FFE mapping must be composed **after** lens distortion and **before** the
   side-by-side half selection.
 - Right-eye FFE is horizontally mirrored by ALVR.

@@ -13,5 +13,7 @@ pub mod view_params;
 pub use session::{Action, Event, Session, SessionState, SessionStatus, StreamInfo};
 pub use settings::{Resolution, Settings};
 pub use stats::{Stats, StatsTracker};
-pub use tracking::{reprojection_offset, HeadTracker, ImuSample, Quat, Vec3};
+pub use tracking::{
+    android_orientation_to_openvr, reprojection_offset, HeadTracker, ImuSample, Quat, Vec3,
+};
 pub use view_params::{EyeView, Fov, ViewParamDedup, ViewParams};

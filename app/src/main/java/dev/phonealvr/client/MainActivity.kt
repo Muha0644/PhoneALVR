@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     settings = SettingsStore.load(this)
+    applyScreenOrientation()
     requestNotificationPermission()
 
     setContent {
@@ -80,6 +81,7 @@ class MainActivity : ComponentActivity() {
   override fun onResume() {
     super.onResume()
     settings = SettingsStore.load(this)
+    applyScreenOrientation()
     SessionRepository.startPolling()
     lifecycleScope.launch { network = NetworkInfoProvider.load() }
     // ALVR wired autolaunch starts this activity with `monkey`; make sure the
@@ -132,9 +134,14 @@ class MainActivity : ComponentActivity() {
     scanLauncher.launch(options)
   }
 
+  private fun applyScreenOrientation() {
+    requestedOrientation = settings.screenOrientation.activityOrientation(vr = false)
+  }
+
   private fun saveSettings(updated: AppSettings) {
     val applied = SettingsStore.saveAndApply(this, updated)
     settings = SettingsStore.load(this)
+    applyScreenOrientation()
     toast(
       when {
         applied -> "Settings applied"

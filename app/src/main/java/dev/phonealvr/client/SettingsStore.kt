@@ -15,6 +15,7 @@ data class AppSettings(
   val crashReportingEndpoint: String = "",
   val serverHint: String = "",
   val viewerProfile: String? = null,
+  val screenOrientation: ScreenOrientation = ScreenOrientation.AUTO,
 ) {
   fun toNativeJson(): String {
     val root = JSONObject()
@@ -56,6 +57,7 @@ object SettingsStore {
   private const val KEY_CRASH_ENDPOINT = "crash_reporting_endpoint"
   private const val KEY_SERVER = "server_hint"
   private const val KEY_VIEWER = "viewer_profile"
+  private const val KEY_ORIENTATION = "screen_orientation"
 
   fun load(context: Context): AppSettings {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -71,6 +73,10 @@ object SettingsStore {
       crashReportingEndpoint = prefs.getString(KEY_CRASH_ENDPOINT, "") ?: "",
       serverHint = prefs.getString(KEY_SERVER, "") ?: "",
       viewerProfile = prefs.getString(KEY_VIEWER, null),
+      screenOrientation =
+        prefs.getString(KEY_ORIENTATION, null)?.let { stored ->
+          runCatching { ScreenOrientation.valueOf(stored) }.getOrNull()
+        } ?: ScreenOrientation.AUTO,
     )
   }
 
@@ -89,6 +95,7 @@ object SettingsStore {
       .putString(KEY_CRASH_ENDPOINT, settings.crashReportingEndpoint)
       .putString(KEY_SERVER, settings.serverHint)
       .putString(KEY_VIEWER, settings.viewerProfile)
+      .putString(KEY_ORIENTATION, settings.screenOrientation.name)
       .apply()
   }
 

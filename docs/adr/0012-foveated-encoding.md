@@ -22,7 +22,8 @@ Implement the ALVR v20.14.1 FFE layout client-side:
    for the MediaCodec width/height, not the base `StreamingStarted`
    resolution (done in `native/src/platform_android.rs`).
 3. Compose the FFE UV mapping after lens distortion and before the side-by-side
-   half selection in the renderer shader.
+   half selection in the renderer shader (done in `render/src/renderer.rs`,
+   including the right-eye horizontal mirror).
 4. Only advertise `foveated_encoding: true` in `ClientCapabilities` after the
    shader hookup is visually verified. Until then the server must not send an
    FFE layout the renderer cannot sample.

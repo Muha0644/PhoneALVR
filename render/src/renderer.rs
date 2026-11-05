@@ -5,7 +5,7 @@
 //! changes only.
 
 use glow::HasContext;
-use phonealvr_viewer::Mesh;
+use phonealvr_viewer::{FoveatedEncoding, Mesh};
 
 #[derive(Debug, thiserror::Error, PartialEq)]
 pub enum RenderError {
@@ -84,6 +84,64 @@ impl FrameParams {
     }
 }
 
+/// Per-stream foveated-encoding shader constants.
+///
+/// These mirror `phonealvr_viewer::FoveatedEncoding`; they only change when a
+/// new stream or FFE configuration arrives, never per frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FoveatedShaderParams {
+    pub view_ratio: [f32; 2],
+    pub edge_ratio: [f32; 2],
+    pub c1: [f32; 2],
+    pub c2: [f32; 2],
+    pub lo_bound: [f32; 2],
+    pub hi_bound: [f32; 2],
+    pub a_left: [f32; 2],
+    pub b_left: [f32; 2],
+    pub a_right: [f32; 2],
+    pub b_right: [f32; 2],
+    pub c_right: [f32; 2],
+}
+
+impl FoveatedShaderParams {
+    fn is_finite(&self) -> bool {
+        [
+            self.view_ratio,
+            self.edge_ratio,
+            self.c1,
+            self.c2,
+            self.lo_bound,
+            self.hi_bound,
+            self.a_left,
+            self.b_left,
+            self.a_right,
+            self.b_right,
+            self.c_right,
+        ]
+        .iter()
+        .flatten()
+        .all(|value| value.is_finite())
+    }
+}
+
+impl From<FoveatedEncoding> for FoveatedShaderParams {
+    fn from(encoding: FoveatedEncoding) -> Self {
+        Self {
+            view_ratio: encoding.view_ratio,
+            edge_ratio: encoding.edge_ratio,
+            c1: encoding.c1,
+            c2: encoding.c2,
+            lo_bound: encoding.lo_bound,
+            hi_bound: encoding.hi_bound,
+            a_left: encoding.a_left,
+            b_left: encoding.b_left,
+            a_right: encoding.a_right,
+            b_right: encoding.b_right,
+            c_right: encoding.c_right,
+        }
+    }
+}
+
 const EXTERNAL_OES: u32 = 0x8D65;
 
 const VERTEX_SHADER: &str = r#"#version 300 es
@@ -105,14 +163,76 @@ uniform float u_chromatic_aberration;
 uniform vec2 u_uv_scale;
 uniform vec2 u_uv_offset;
 uniform vec2 u_reprojection;
+uniform int u_ffe_enabled;
+uniform int u_eye_index;
+uniform vec2 u_ffe_view_ratio;
+uniform vec2 u_ffe_edge_ratio;
+uniform vec2 u_ffe_c1;
+uniform vec2 u_ffe_c2;
+uniform vec2 u_ffe_lo_bound;
+uniform vec2 u_ffe_hi_bound;
+uniform vec2 u_ffe_a_left;
+uniform vec2 u_ffe_b_left;
+uniform vec2 u_ffe_a_right;
+uniform vec2 u_ffe_b_right;
+uniform vec2 u_ffe_c_right;
 in vec2 v_texcoord;
 out vec4 out_color;
 
+vec2 ffe_map(vec2 uv) {
+    // ALVR's foveated layout keeps a sharp centre band and compresses the
+    // edges. Invert that here, after lens distortion and before the
+    // side-by-side split. Mirrors `viewer::FoveatedEncoding::map_eye_uv`.
+    if (u_eye_index == 1) {
+        uv.x = 1.0 - uv.x;
+    }
+    vec2 center = (uv - u_ffe_c1) * u_ffe_edge_ratio / u_ffe_c2;
+
+    // `a_left`/`a_right` are zero for a linear (edge_ratio == 1) layout; fall
+    // back to the identity edge in that case instead of dividing by zero.
+    vec2 left_scale = 2.0 * u_ffe_a_left;
+    vec2 right_scale = 2.0 * u_ffe_a_right;
+    // 1.0 where the coefficient is usable, 0.0 where it is ~zero.
+    vec2 left_valid = step(vec2(1e-5), abs(left_scale));
+    vec2 right_valid = step(vec2(1e-5), abs(right_scale));
+    vec2 left_divisor = left_scale + (1.0 - left_valid);
+    vec2 right_divisor = right_scale + (1.0 - right_valid);
+
+    vec2 left_discriminant = max(
+        u_ffe_b_left * u_ffe_b_left + 4.0 * u_ffe_a_left * uv,
+        vec2(0.0)
+    );
+    vec2 right_discriminant = max(
+        u_ffe_b_right * u_ffe_b_right
+            - 4.0 * (u_ffe_c_right - u_ffe_a_right * uv),
+        vec2(0.0)
+    );
+    vec2 left_edge = mix(uv, (-u_ffe_b_left + sqrt(left_discriminant)) / left_divisor, left_valid);
+    vec2 right_edge = mix(uv, (-u_ffe_b_right + sqrt(right_discriminant)) / right_divisor, right_valid);
+
+    vec2 mapped = center;
+    mapped.x = uv.x < u_ffe_lo_bound.x ? left_edge.x
+        : (uv.x > u_ffe_hi_bound.x ? right_edge.x : center.x);
+    mapped.y = uv.y < u_ffe_lo_bound.y ? left_edge.y
+        : (uv.y > u_ffe_hi_bound.y ? right_edge.y : center.y);
+    mapped = mapped * u_ffe_view_ratio;
+
+    if (u_eye_index == 1) {
+        mapped.x = 1.0 - mapped.x;
+    }
+    return clamp(mapped, 0.0, 1.0);
+}
+
 vec2 to_source(vec2 eye_uv) {
     // ALVR encodes the two eyes side by side. The distortion mesh produced
-    // eye-local UVs; this maps them to this eye's half of the source frame.
-    // `u_reprojection` is the late-latching shift from the newest IMU sample.
-    return clamp(eye_uv + u_reprojection, 0.0, 1.0) * u_uv_scale + u_uv_offset;
+    // eye-local UVs; undo the foveated layout, then map them to this eye's
+    // half of the source frame. `u_reprojection` is the late-latching shift
+    // from the newest IMU sample.
+    vec2 uv = clamp(eye_uv + u_reprojection, 0.0, 1.0);
+    if (u_ffe_enabled != 0) {
+        uv = ffe_map(uv);
+    }
+    return uv * u_uv_scale + u_uv_offset;
 }
 
 vec3 sample_rgb(vec2 eye_uv) {
@@ -146,14 +266,76 @@ uniform float u_chromatic_aberration;
 uniform vec2 u_uv_scale;
 uniform vec2 u_uv_offset;
 uniform vec2 u_reprojection;
+uniform int u_ffe_enabled;
+uniform int u_eye_index;
+uniform vec2 u_ffe_view_ratio;
+uniform vec2 u_ffe_edge_ratio;
+uniform vec2 u_ffe_c1;
+uniform vec2 u_ffe_c2;
+uniform vec2 u_ffe_lo_bound;
+uniform vec2 u_ffe_hi_bound;
+uniform vec2 u_ffe_a_left;
+uniform vec2 u_ffe_b_left;
+uniform vec2 u_ffe_a_right;
+uniform vec2 u_ffe_b_right;
+uniform vec2 u_ffe_c_right;
 in vec2 v_texcoord;
 out vec4 out_color;
 
+vec2 ffe_map(vec2 uv) {
+    // ALVR's foveated layout keeps a sharp centre band and compresses the
+    // edges. Invert that here, after lens distortion and before the
+    // side-by-side split. Mirrors `viewer::FoveatedEncoding::map_eye_uv`.
+    if (u_eye_index == 1) {
+        uv.x = 1.0 - uv.x;
+    }
+    vec2 center = (uv - u_ffe_c1) * u_ffe_edge_ratio / u_ffe_c2;
+
+    // `a_left`/`a_right` are zero for a linear (edge_ratio == 1) layout; fall
+    // back to the identity edge in that case instead of dividing by zero.
+    vec2 left_scale = 2.0 * u_ffe_a_left;
+    vec2 right_scale = 2.0 * u_ffe_a_right;
+    // 1.0 where the coefficient is usable, 0.0 where it is ~zero.
+    vec2 left_valid = step(vec2(1e-5), abs(left_scale));
+    vec2 right_valid = step(vec2(1e-5), abs(right_scale));
+    vec2 left_divisor = left_scale + (1.0 - left_valid);
+    vec2 right_divisor = right_scale + (1.0 - right_valid);
+
+    vec2 left_discriminant = max(
+        u_ffe_b_left * u_ffe_b_left + 4.0 * u_ffe_a_left * uv,
+        vec2(0.0)
+    );
+    vec2 right_discriminant = max(
+        u_ffe_b_right * u_ffe_b_right
+            - 4.0 * (u_ffe_c_right - u_ffe_a_right * uv),
+        vec2(0.0)
+    );
+    vec2 left_edge = mix(uv, (-u_ffe_b_left + sqrt(left_discriminant)) / left_divisor, left_valid);
+    vec2 right_edge = mix(uv, (-u_ffe_b_right + sqrt(right_discriminant)) / right_divisor, right_valid);
+
+    vec2 mapped = center;
+    mapped.x = uv.x < u_ffe_lo_bound.x ? left_edge.x
+        : (uv.x > u_ffe_hi_bound.x ? right_edge.x : center.x);
+    mapped.y = uv.y < u_ffe_lo_bound.y ? left_edge.y
+        : (uv.y > u_ffe_hi_bound.y ? right_edge.y : center.y);
+    mapped = mapped * u_ffe_view_ratio;
+
+    if (u_eye_index == 1) {
+        mapped.x = 1.0 - mapped.x;
+    }
+    return clamp(mapped, 0.0, 1.0);
+}
+
 vec2 to_source(vec2 eye_uv) {
     // ALVR encodes the two eyes side by side. The distortion mesh produced
-    // eye-local UVs; this maps them to this eye's half of the source frame.
-    // `u_reprojection` is the late-latching shift from the newest IMU sample.
-    return clamp(eye_uv + u_reprojection, 0.0, 1.0) * u_uv_scale + u_uv_offset;
+    // eye-local UVs; undo the foveated layout, then map them to this eye's
+    // half of the source frame. `u_reprojection` is the late-latching shift
+    // from the newest IMU sample.
+    vec2 uv = clamp(eye_uv + u_reprojection, 0.0, 1.0);
+    if (u_ffe_enabled != 0) {
+        uv = ffe_map(uv);
+    }
+    return uv * u_uv_scale + u_uv_offset;
 }
 
 vec3 sample_rgb(vec2 eye_uv) {
@@ -185,6 +367,19 @@ struct Program {
     u_uv_scale: Option<glow::UniformLocation>,
     u_uv_offset: Option<glow::UniformLocation>,
     u_reprojection: Option<glow::UniformLocation>,
+    u_ffe_enabled: Option<glow::UniformLocation>,
+    u_eye_index: Option<glow::UniformLocation>,
+    u_ffe_view_ratio: Option<glow::UniformLocation>,
+    u_ffe_edge_ratio: Option<glow::UniformLocation>,
+    u_ffe_c1: Option<glow::UniformLocation>,
+    u_ffe_c2: Option<glow::UniformLocation>,
+    u_ffe_lo_bound: Option<glow::UniformLocation>,
+    u_ffe_hi_bound: Option<glow::UniformLocation>,
+    u_ffe_a_left: Option<glow::UniformLocation>,
+    u_ffe_b_left: Option<glow::UniformLocation>,
+    u_ffe_a_right: Option<glow::UniformLocation>,
+    u_ffe_b_right: Option<glow::UniformLocation>,
+    u_ffe_c_right: Option<glow::UniformLocation>,
 }
 
 impl Program {
@@ -219,6 +414,19 @@ impl Program {
                 u_uv_scale: gl.get_uniform_location(program, "u_uv_scale"),
                 u_uv_offset: gl.get_uniform_location(program, "u_uv_offset"),
                 u_reprojection: gl.get_uniform_location(program, "u_reprojection"),
+                u_ffe_enabled: gl.get_uniform_location(program, "u_ffe_enabled"),
+                u_eye_index: gl.get_uniform_location(program, "u_eye_index"),
+                u_ffe_view_ratio: gl.get_uniform_location(program, "u_ffe_view_ratio"),
+                u_ffe_edge_ratio: gl.get_uniform_location(program, "u_ffe_edge_ratio"),
+                u_ffe_c1: gl.get_uniform_location(program, "u_ffe_c1"),
+                u_ffe_c2: gl.get_uniform_location(program, "u_ffe_c2"),
+                u_ffe_lo_bound: gl.get_uniform_location(program, "u_ffe_lo_bound"),
+                u_ffe_hi_bound: gl.get_uniform_location(program, "u_ffe_hi_bound"),
+                u_ffe_a_left: gl.get_uniform_location(program, "u_ffe_a_left"),
+                u_ffe_b_left: gl.get_uniform_location(program, "u_ffe_b_left"),
+                u_ffe_a_right: gl.get_uniform_location(program, "u_ffe_a_right"),
+                u_ffe_b_right: gl.get_uniform_location(program, "u_ffe_b_right"),
+                u_ffe_c_right: gl.get_uniform_location(program, "u_ffe_c_right"),
             })
         }
     }
@@ -231,11 +439,12 @@ impl Program {
         &self,
         gl: &glow::Context,
         params: FrameParams,
-        texture_unit: i32,
         uv_scale: [f32; 2],
         uv_offset: [f32; 2],
+        foveated: Option<&FoveatedShaderParams>,
+        eye: usize,
     ) {
-        gl.uniform_1_i32(self.u_texture.as_ref(), texture_unit);
+        gl.uniform_1_i32(self.u_texture.as_ref(), 0);
         gl.uniform_1_f32(self.u_brightness.as_ref(), params.brightness);
         gl.uniform_1_f32(self.u_vignette.as_ref(), params.vignette);
         gl.uniform_1_f32(
@@ -249,7 +458,29 @@ impl Program {
             params.reprojection[0],
             params.reprojection[1],
         );
+        gl.uniform_1_i32(self.u_eye_index.as_ref(), eye as i32);
+        match foveated {
+            Some(foveated) => {
+                gl.uniform_1_i32(self.u_ffe_enabled.as_ref(), 1);
+                set_vec2(gl, &self.u_ffe_view_ratio, foveated.view_ratio);
+                set_vec2(gl, &self.u_ffe_edge_ratio, foveated.edge_ratio);
+                set_vec2(gl, &self.u_ffe_c1, foveated.c1);
+                set_vec2(gl, &self.u_ffe_c2, foveated.c2);
+                set_vec2(gl, &self.u_ffe_lo_bound, foveated.lo_bound);
+                set_vec2(gl, &self.u_ffe_hi_bound, foveated.hi_bound);
+                set_vec2(gl, &self.u_ffe_a_left, foveated.a_left);
+                set_vec2(gl, &self.u_ffe_b_left, foveated.b_left);
+                set_vec2(gl, &self.u_ffe_a_right, foveated.a_right);
+                set_vec2(gl, &self.u_ffe_b_right, foveated.b_right);
+                set_vec2(gl, &self.u_ffe_c_right, foveated.c_right);
+            }
+            None => gl.uniform_1_i32(self.u_ffe_enabled.as_ref(), 0),
+        }
     }
+}
+
+unsafe fn set_vec2(gl: &glow::Context, location: &Option<glow::UniformLocation>, value: [f32; 2]) {
+    gl.uniform_2_f32(location.as_ref(), value[0], value[1]);
 }
 
 unsafe fn compile(
@@ -279,6 +510,7 @@ pub struct StereoRenderer {
     index_count: i32,
     width: i32,
     height: i32,
+    foveated: Option<FoveatedShaderParams>,
 }
 
 impl StereoRenderer {
@@ -317,6 +549,7 @@ impl StereoRenderer {
                 index_count: 0,
                 width: 1,
                 height: 1,
+                foveated: None,
             })
         }
     }
@@ -324,6 +557,21 @@ impl StereoRenderer {
     pub fn resize(&mut self, width: i32, height: i32) {
         self.width = width.max(1);
         self.height = height.max(1);
+    }
+
+    /// Enable or disable the foveated-encoding UV remap. Called once per
+    /// stream/FFE configuration change, never per frame. Non-finite constants
+    /// (from a malformed server config) disable the remap rather than
+    /// producing NaN UVs.
+    pub fn set_foveated(&mut self, foveated: Option<FoveatedShaderParams>) {
+        match foveated {
+            Some(params) if params.is_finite() => self.foveated = Some(params),
+            Some(_) => {
+                log::warn!("ignoring non-finite foveated-encoding constants");
+                self.foveated = None;
+            }
+            None => self.foveated = None,
+        }
     }
 
     /// Upload a new distortion mesh. Called on profile or display changes.
@@ -403,7 +651,7 @@ impl StereoRenderer {
                 TextureKind::Rgba => gl.bind_texture(glow::TEXTURE_2D, Some(*texture)),
             }
             program.use_program(gl);
-            program.set_params(gl, params, 0, uv_scale, uv_offset);
+            program.set_params(gl, params, uv_scale, uv_offset, self.foveated.as_ref(), eye);
             gl.draw_elements(glow::TRIANGLES, self.index_count, glow::UNSIGNED_INT, 0);
         }
 
@@ -473,5 +721,62 @@ mod tests {
         assert_eq!(params.vignette, 0.0);
         assert_eq!(params.chromatic_aberration, 0.0);
         assert_eq!(params.reprojection, [0.0, 0.25]);
+    }
+
+    #[test]
+    fn foveated_shader_params_copy_encoding_constants() {
+        use phonealvr_viewer::{FoveatedConfig, FoveatedEncoding};
+
+        let encoding = FoveatedEncoding::new([1088, 960], FoveatedConfig::default());
+        let params = FoveatedShaderParams::from(encoding);
+        assert_eq!(params.view_ratio, encoding.view_ratio);
+        assert_eq!(params.edge_ratio, encoding.edge_ratio);
+        assert_eq!(params.c1, encoding.c1);
+        assert_eq!(params.c2, encoding.c2);
+        assert_eq!(params.lo_bound, encoding.lo_bound);
+        assert_eq!(params.hi_bound, encoding.hi_bound);
+        assert_eq!(params.a_left, encoding.a_left);
+        assert_eq!(params.b_left, encoding.b_left);
+        assert_eq!(params.a_right, encoding.a_right);
+        assert_eq!(params.b_right, encoding.b_right);
+        assert_eq!(params.c_right, encoding.c_right);
+        assert!(params.is_finite());
+    }
+
+    #[test]
+    fn non_finite_foveated_params_are_rejected() {
+        let mut params = FoveatedShaderParams {
+            view_ratio: [1.0; 2],
+            edge_ratio: [1.0; 2],
+            c1: [0.0; 2],
+            c2: [1.0; 2],
+            lo_bound: [0.0; 2],
+            hi_bound: [1.0; 2],
+            a_left: [0.0; 2],
+            b_left: [0.0; 2],
+            a_right: [0.0; 2],
+            b_right: [0.0; 2],
+            c_right: [0.0; 2],
+        };
+        assert!(params.is_finite());
+        params.c2[1] = f32::NAN;
+        assert!(!params.is_finite());
+    }
+
+    #[test]
+    fn both_shaders_apply_ffe_after_distortion_before_side_by_side() {
+        for shader in [FRAGMENT_SHADER_2D, FRAGMENT_SHADER_EXTERNAL] {
+            assert!(shader.contains("uniform int u_ffe_enabled;"));
+            assert!(shader.contains("uniform int u_eye_index;"));
+            let distortion_done = shader.find("vec2 to_source").expect("to_source");
+            let ffe = shader.find("uv = ffe_map(uv);").expect("ffe call");
+            let split = shader
+                .find("* u_uv_scale + u_uv_offset")
+                .expect("side-by-side split");
+            assert!(distortion_done < ffe, "FFE before lens UV");
+            assert!(ffe < split, "FFE after lens UV, before side-by-side");
+            // Mirror both before and after the FFE transform for the right eye.
+            assert_eq!(shader.matches("u_eye_index == 1").count(), 2);
+        }
     }
 }

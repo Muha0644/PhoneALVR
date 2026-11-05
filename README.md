@@ -11,8 +11,9 @@ implemented in this repository.
 > **Status: implementation in progress.** The Rust core, viewer math, session
 > state machine, renderer and JNI boundary are implemented. Wired mode works on
 > a physical device. The current blocker is decoder/thermal load: the target
-> phone cannot sustain the full side-by-side stream. Foveated-encoding math and
-> decoder sizing are implemented; the renderer shader hookup is the next slice.
+> phone cannot sustain the full side-by-side stream. Foveated-encoding math,
+> decoder sizing and the renderer shader hookup are implemented; physical-device
+> validation is the next step.
 > See [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) and
 > [`docs/dev/FFE_HANDOFF.md`](docs/dev/FFE_HANDOFF.md).
 
@@ -136,7 +137,7 @@ to the built-in default in Settings.
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — connection, black screen, latency
 - [`docs/VERIFICATION.md`](docs/VERIFICATION.md) — what has actually been built and tested
 - [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) — current state and next tasks
-- [`docs/dev/FFE_HANDOFF.md`](docs/dev/FFE_HANDOFF.md) — foveated-encoding implementation plan
+- [`docs/dev/FFE_HANDOFF.md`](docs/dev/FFE_HANDOFF.md) — foveated-encoding implementation and verification
 - [`docs/manual-test-plan.md`](docs/manual-test-plan.md) — device/soak/reconnect checklist
 - [`docs/adr/`](docs/adr/) — architecture decisions, including every OPEN item
 - [`AGENTS.md`](AGENTS.md) — repository guide for coding agents

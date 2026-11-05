@@ -77,7 +77,7 @@ nativeDestroy, nativeStart, nativeStop
 nativeUpdateSettings(json), nativeSetViewerProfile(json)
 nativeOnSurfaceCreated(Surface), nativeOnSurfaceChanged(w,h), nativeOnSurfaceDestroyed
 nativeRenderFrame, nativeRecenter
-nativePushOrientation(x,y,z,w,timestampNs)
+nativePushOrientation(x,y,z,w,timestampNs,displayRotation)
 nativePollStatus, nativeGetStats, nativeGetDiagnostics
 ```
 
@@ -97,9 +97,11 @@ copies values and delegates to `Runtime` / `platform`.
    distortion mesh produces eye-local UVs; a uniform selects the left or right
    half of the source texture.
 5. A precomputed per-eye distortion mesh is drawn into the left/right viewport.
-6. `eglPresentationTimeANDROID` is used when available; `eglSwapBuffers` ends
-   the frame.
+6. `eglSwapBuffers` (swap interval 1) paces the render thread; there is no
+   second software timer. When no decoded frame is ready, the last frame stays
+   on screen and the thread polls again instead of swapping an empty buffer.
 7. ALVR receives `report_compositor_start` / `report_submit` for its statistics.
+   The renderer logs measured FPS every five seconds.
 
 ### Foveated encoding
 
@@ -109,10 +111,12 @@ mapping. When FFE is negotiated, `native/src/platform_android.rs` uses the FFE
 **encoded** per-eye resolution for the MediaCodec width/height instead of the
 base stream resolution, and `Runtime` stores the layout for the renderer.
 
-The renderer shader hookup is the next vertical slice: FFE is applied after
-lens distortion and before the side-by-side half selection, including ALVR's
-right-eye horizontal mirror. `ClientCapabilities.foveated_encoding` stays
-false until that shader path is verified; see `docs/dev/FFE_HANDOFF.md`.
+The renderer applies the FFE remap after lens distortion and before the
+side-by-side half selection, including ALVR's right-eye horizontal mirror.
+The constants are uploaded once per stream/profile change via
+`StereoRenderer::set_foveated`, never per frame. `ClientCapabilities.
+foveated_encoding` stays false until the shader path is verified on the
+device; see `docs/dev/FFE_HANDOFF.md`.
 
 The current implementation creates one `EGLImage` per decoded frame. Moving to
 a small image pool is an M4 performance task; the decode path is already
@@ -135,7 +139,15 @@ topology/corner checks. A checkerboard scene validates it visually on device.
 ## Tracking
 
 Android's `TYPE_ROTATION_VECTOR` sensor provides a quaternion already fused
-from gyro/accelerometer/magnetometer. `core::tracking::HeadTracker`:
+from gyro/accelerometer/magnetometer, but it is expressed in the device's
+natural portrait frame relative to an East-North-Up world. A JNI-side call to
+`core::tracking::android_orientation_to_openvr` applies the display rotation
+(the phone is normally used in landscape; the UI rotation is a positive Z
+rotation relative to the device) and the ENU → OpenVR world change
+before the sample reaches `HeadTracker`. With the screen facing the eyes, the
+displayed frame is the headset frame.
+
+`core::tracking::HeadTracker`:
 
 - normalizes and ingests samples with monotonic timestamps;
 - estimates world-frame angular velocity from the shortest-arc delta;

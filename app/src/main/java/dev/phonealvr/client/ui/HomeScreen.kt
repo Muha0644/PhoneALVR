@@ -1,6 +1,7 @@
 package dev.phonealvr.client.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,6 +25,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -49,7 +52,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.phonealvr.client.AppSettings
+import dev.phonealvr.client.BuildConfig
 import dev.phonealvr.client.NetworkInfo
+import dev.phonealvr.client.ScreenOrientation
 import dev.phonealvr.client.SessionUiState
 import kotlin.math.max
 import kotlin.math.min
@@ -155,7 +160,12 @@ fun HomeScreen(
       }
 
       val stream = state.stream
-      val encodedWidth = stream?.width?.times(2) ?: 0
+      val encodedWidth =
+        if (stream != null && stream.encodedWidth > 0) stream.encodedWidth * 2
+        else stream?.width?.times(2) ?: 0
+      val encodedHeight =
+        if (stream != null && stream.encodedHeight > 0) stream.encodedHeight
+        else stream?.height ?: 0
       if (
         stream != null &&
           (stream.width > nativePerEyeWidth ||
@@ -174,7 +184,9 @@ fun HomeScreen(
               )
               Text(
                 "The stream is ${stream.width}×${stream.height} per eye, encoded as " +
-                  "$encodedWidth×${stream.height} side-by-side. This phone's panel is " +
+                  "$encodedWidth×$encodedHeight side-by-side" +
+                  (if (stream.foveated) " with foveated encoding" else "") +
+                  ". This phone's panel is " +
                   "$nativePerEyeWidth×$nativePerEyeHeight per eye. Many phone H.264 decoders " +
                   "max out at 1920 px encoded width; exceeding it can cause green flashes, " +
                   "stutter and decoder restarts. Set ALVR → Video → Resolution to about " +
@@ -348,6 +360,7 @@ private fun SettingsDialog(
   var manualFov by remember { mutableStateOf("90") }
   var manualK1 by remember { mutableStateOf("0.441") }
   var manualK2 by remember { mutableStateOf("0.156") }
+  var orientationMenu by remember { mutableStateOf(false) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -402,6 +415,32 @@ private fun SettingsDialog(
               singleLine = true,
               modifier = Modifier.width(120.dp),
             )
+          }
+        }
+        item {
+          Text("Screen rotation")
+          Text(
+            "Locks the app and the VR view. Auto follows the phone outside VR and stays landscape in VR.",
+            style = MaterialTheme.typography.bodySmall,
+          )
+          Box {
+            OutlinedButton(onClick = { orientationMenu = true }) {
+              Text(draft.screenOrientation.label)
+            }
+            DropdownMenu(
+              expanded = orientationMenu,
+              onDismissRequest = { orientationMenu = false },
+            ) {
+              ScreenOrientation.entries.forEach { option ->
+                DropdownMenuItem(
+                  text = { Text(option.label) },
+                  onClick = {
+                    draft = draft.copy(screenOrientation = option)
+                    orientationMenu = false
+                  },
+                )
+              }
+            }
           }
         }
         item {
@@ -511,6 +550,14 @@ private fun SettingsDialog(
             Spacer(Modifier.width(8.dp))
             Text("Export diagnostics")
           }
+        }
+        item {
+          Text(
+            "build: ${BuildConfig.BUILD_ID} · ${BuildConfig.BUILD_TIME}",
+            style = MaterialTheme.typography.labelSmall,
+            fontFamily = FontFamily.Monospace,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+          )
         }
       }
     },

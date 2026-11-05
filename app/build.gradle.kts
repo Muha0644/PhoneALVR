@@ -1,4 +1,7 @@
 import com.diffplug.spotless.LineEnding
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -7,6 +10,31 @@ plugins {
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.spotless)
 }
+
+/** Short commit plus a `-dirty` marker so a test build is identifiable. */
+fun buildId(): String =
+  runCatching {
+      val commit =
+        providers
+          .exec { commandLine("git", "rev-parse", "--short", "HEAD") }
+          .standardOutput
+          .asText
+          .get()
+          .trim()
+      val dirty =
+        providers
+          .exec { commandLine("git", "status", "--porcelain") }
+          .standardOutput
+          .asText
+          .get()
+          .isNotBlank()
+      if (dirty) "$commit-dirty" else commit
+    }
+    .getOrElse { "unknown" }
+
+/** Wall-clock build time in UTC, for the settings modal. */
+fun buildTime(): String =
+  Instant.now().atZone(ZoneOffset.UTC).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'"))
 
 android {
   namespace = "dev.phonealvr.client"
@@ -27,6 +55,8 @@ android {
     ndk { abiFilters += listOf("arm64-v8a") }
 
     buildConfigField("String", "ALVR_VERSION", "\"v20.14.1\"")
+    buildConfigField("String", "BUILD_ID", "\"${buildId()}\"")
+    buildConfigField("String", "BUILD_TIME", "\"${buildTime()}\"")
   }
 
   buildTypes {
