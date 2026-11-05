@@ -1,0 +1,32 @@
+[package]
+name = "phonealvr-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "JNI/native boundary for PhoneALVR (ALVR client core + GLES renderer)"
+
+[lib]
+name = "phonealvr"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+phonealvr-core = { path = "../core" }
+phonealvr-viewer = { path = "../viewer" }
+phonealvr-render = { path = "../render" }
+jni.workspace = true
+serde_json.workspace = true
+log.workspace = true
+glow.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+alvr_client_core.workspace = true
+alvr_common.workspace = true
+alvr_packets.workspace = true
+alvr_session.workspace = true
+android_logger.workspace = true
+ndk-sys.workspace = true
+ndk-context = "0.1"
+libc = "0.2"

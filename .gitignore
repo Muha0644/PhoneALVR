@@ -1,0 +1,40 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.orig
+
+# Gradle / Android
+.gradle/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+app/src/main/jniLibs/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Signing — never commit
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+.env
+.env.*
+
+# Native prebuilt artifacts and downloaded toolchains
+/artifacts/
+/third_party/
+/tools/
+/dist/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.swp

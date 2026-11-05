@@ -1,0 +1,44 @@
+[workspace]
+resolver = "2"
+members = ["core", "viewer", "render", "native"]
+# Host checks and tests do not need the pinned ALVR client core. The `native`
+# crate compiles its ALVR adapter only for Android (see native/build.rs and the
+# target-specific dependency in native/Cargo.toml).
+default-members = ["core", "viewer", "render"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+authors = ["PhoneALVR contributors"]
+repository = "https://github.com/phonealvr/PhoneALVR"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+log = "0.4"
+glow = "0.16"
+khronos-egl = { version = "6", features = ["dynamic"] }
+jni = "0.21"
+ndk-sys = "0.6"
+android_logger = "0.14"
+
+# Exact upstream revision. Bump this together with docs/COMPATIBILITY.md and
+# the compatibility tests. See docs/adr/0002-alvr-dependency.md.
+alvr_client_core = { git = "https://github.com/alvr-org/ALVR.git", tag = "v20.14.1" }
+alvr_common = { git = "https://github.com/alvr-org/ALVR.git", tag = "v20.14.1" }
+alvr_packets = { git = "https://github.com/alvr-org/ALVR.git", tag = "v20.14.1" }
+alvr_session = { git = "https://github.com/alvr-org/ALVR.git", tag = "v20.14.1" }
+
+[profile.release]
+debug = "line-tables-only"
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+
+[profile.distribution]
+inherits = "release"
+lto = "fat"
+strip = "symbols"

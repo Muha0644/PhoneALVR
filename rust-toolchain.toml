@@ -1,0 +1,11 @@
+[toolchain]
+# ALVR v20.14.1 declares rust-version 1.82. Keep the workspace on a pinned
+# stable toolchain so host, CI and Android builds agree. Update together with
+# docs/COMPATIBILITY.md.
+channel = "1.88.0"
+components = ["rustfmt", "clippy"]
+targets = [
+    "aarch64-linux-android",
+    "x86_64-linux-android",
+]
+profile = "minimal"

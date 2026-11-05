@@ -1,0 +1,15 @@
+[package]
+name = "phonealvr-viewer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Cardboard-compatible viewer profiles, lens distortion and stereo geometry for PhoneALVR"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+base64 = "0.22"

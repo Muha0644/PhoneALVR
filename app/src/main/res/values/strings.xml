@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PhoneALVR</string>
+    <string name="notification_channel_name">Streaming session</string>
+    <string name="notification_channel_description">Keeps the ALVR session alive while streaming.</string>
+    <string name="notification_title">PhoneALVR is waiting for ALVR</string>
+    <string name="notification_text">Open ALVR on your PC and connect to this phone.</string>
+    <string name="notification_stop">Stop waiting</string>
+</resources>

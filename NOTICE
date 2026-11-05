@@ -1,0 +1,34 @@
+PhoneALVR
+Copyright (c) 2026 PhoneALVR contributors
+
+This project is licensed under the MIT License (see LICENSE).
+
+Third-party components
+-----------------------
+
+ALVR
+  https://github.com/alvr-org/ALVR
+  MIT License. PhoneALVR depends on the ALVR client core at tag v20.14.1.
+  ALVR is not bundled as server or SteamVR/OpenVR binaries.
+
+Google Cardboard viewer profile schema
+  The Cardboard viewer profile protobuf field numbers and JSON field names are
+  derived from the Cardboard SDK / Cardboard viewer profile format, which is
+  licensed under the Apache License, Version 2.0.
+  https://github.com/googlevr/cardboard
+  No Cardboard SDK binary or rendering code is bundled; PhoneALVR implements
+  its own distortion math and renderer.
+
+AndroidX, Jetpack Compose, Kotlin, kotlinx.coroutines
+  Apache License 2.0.
+
+ZXing / zxing-android-embedded
+  Apache License 2.0. Used for QR scanning only.
+
+Rust crates
+  See Cargo.lock and each crate's license. Relevant direct dependencies
+  include glow (MIT/Apache-2.0), jni (MIT/Apache-2.0), serde (MIT/Apache-2.0),
+  base64 (MIT/Apache-2.0), thiserror (MIT/Apache-2.0).
+
+This file is informational; the license text of each dependency governs its
+use. Report a licensing issue before shipping a release.
