@@ -20,7 +20,6 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -45,9 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -72,7 +69,6 @@ fun HomeScreen(
   onSaveSettings: (AppSettings) -> Unit,
 ) {
   var showSettings by remember { mutableStateOf(false) }
-  val clipboard = LocalClipboardManager.current
   val displayMetrics = LocalContext.current.resources.displayMetrics
   val nativePerEyeWidth = max(displayMetrics.widthPixels, displayMetrics.heightPixels) / 2
   val nativePerEyeHeight = min(displayMetrics.widthPixels, displayMetrics.heightPixels)
@@ -82,10 +78,10 @@ fun HomeScreen(
       TopAppBar(
         title = { Text("PhoneALVR") },
         actions = {
-          OutlinedButton(onClick = onExport) {
-            Icon(Icons.Default.Share, contentDescription = null)
+          OutlinedButton(onClick = { showSettings = true }) {
+            Icon(Icons.Default.Settings, contentDescription = null)
             Spacer(Modifier.width(8.dp))
-            Text("Diagnostics")
+            Text("Settings")
           }
         },
       )
@@ -120,35 +116,15 @@ fun HomeScreen(
         }
       }
 
-      if (state.isStreaming) {
-        item {
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      item {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+          if (state.isStreaming) {
             OutlinedButton(onClick = onRecenter) { Text("Recenter") }
-            OutlinedButton(onClick = onScan) {
-              Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-              Spacer(Modifier.width(8.dp))
-              Text("Viewer QR")
-            }
-            OutlinedButton(onClick = { showSettings = true }) {
-              Icon(Icons.Default.Settings, contentDescription = null)
-              Spacer(Modifier.width(8.dp))
-              Text("Settings")
-            }
           }
-        }
-      } else {
-        item {
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onScan) {
-              Icon(Icons.Default.QrCodeScanner, contentDescription = null)
-              Spacer(Modifier.width(8.dp))
-              Text("Scan viewer")
-            }
-            OutlinedButton(onClick = { showSettings = true }) {
-              Icon(Icons.Default.Settings, contentDescription = null)
-              Spacer(Modifier.width(8.dp))
-              Text("Settings")
-            }
+          OutlinedButton(onClick = onScan) {
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text(if (state.isStreaming) "Viewer QR" else "Scan viewer")
           }
         }
       }
@@ -178,47 +154,32 @@ fun HomeScreen(
         }
       }
 
-      item {
-        WaitingCard(
-          network,
-          state,
-          onCopy = { clipboard.setText(AnnotatedString(network.describe())) }
-        )
-      }
-
-      if (state.state == "idle" || state.state == "closed") {
-        item { OnboardingCard() }
-      }
-
-      item {
-        Card {
-          Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Session settings", style = MaterialTheme.typography.titleMedium)
-            Text(
-              "Viewer: ${settings.viewerProfile?.let { "custom profile" } ?: "built-in Cardboard v1"}"
-            )
-            Text("Brightness: ${"%.0f".format(settings.brightness * 100)}%")
-            Text("Refresh: ${settings.refreshRateHz?.let { "%.0f Hz".format(it) } ?: "automatic"}")
-            Text(
-              "Resolution cap: " +
-                if (settings.resolutionCapWidth > 0) {
-                  "${settings.resolutionCapWidth}x${settings.resolutionCapHeight} per eye"
-                } else {
-                  "native panel"
-                },
-            )
-            Text("Native per-eye resolution: ${nativePerEyeWidth}x${nativePerEyeHeight}")
-            state.stream?.let { stream ->
-              if (stream.width > nativePerEyeWidth || stream.height > nativePerEyeHeight) {
-                Text(
-                  "Warning: the stream is larger than the panel. Set ALVR resolution to Scale 1.0.",
-                  color = MaterialTheme.colorScheme.error,
-                  style = MaterialTheme.typography.bodySmall,
-                )
-              }
+      val stream = state.stream
+      if (
+        stream != null && (stream.width > nativePerEyeWidth || stream.height > nativePerEyeHeight)
+      ) {
+        item {
+          Card(
+            colors =
+              CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+          ) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+              Text("Stream resolution is too large", style = MaterialTheme.typography.titleMedium)
+              Text(
+                "The stream is ${stream.width}×${stream.height} per eye, but this phone's panel is " +
+                  "$nativePerEyeWidth×$nativePerEyeHeight per eye. Set ALVR → Video → Resolution " +
+                  "to Scale 1.0 (or a lower value). A stream above the panel can also fail to decode.",
+                style = MaterialTheme.typography.bodySmall,
+              )
             }
           }
         }
+      }
+
+      item { WaitingCard(network, state) }
+
+      if (state.state == "idle" || state.state == "closed") {
+        item { OnboardingCard() }
       }
     }
   }
@@ -235,6 +196,7 @@ fun HomeScreen(
         showSettings = false
         onScan()
       },
+      onExport = onExport,
     )
   }
 }
@@ -295,21 +257,23 @@ private fun StatusCard(state: SessionUiState) {
 }
 
 @Composable
-private fun WaitingCard(network: NetworkInfo, state: SessionUiState, onCopy: () -> Unit) {
+private fun WaitingCard(network: NetworkInfo, state: SessionUiState) {
   Card {
     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("Connection", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.width(12.dp))
-        AssistChip(onClick = onCopy, label = { Text("Copy addresses") })
+      Text("Connection", style = MaterialTheme.typography.titleMedium)
+      if (network.deviceName.isNotBlank()) {
+        Text("Device: ${network.deviceName}", fontFamily = FontFamily.Monospace)
       }
-      Text("Hostname: ${network.hostname}", fontFamily = FontFamily.Monospace)
       Text("LAN IPs: ${network.addresses.ifEmpty { listOf("none detected") }.joinToString()}")
       Text(
         "Listening ports: ${network.controlPort} (control), ${network.streamPort} (stream)",
         fontFamily = FontFamily.Monospace,
       )
       Spacer(Modifier.height(4.dp))
+      Text(
+        "ALVR shows this phone under a generated hostname. Match it by the LAN IP above.",
+        style = MaterialTheme.typography.bodySmall,
+      )
       Text(
         if (state.isListening) {
           "On the PC, open ALVR. This phone should appear in the dashboard. " +
@@ -332,14 +296,20 @@ private fun OnboardingCard() {
       Text("First time?", style = MaterialTheme.typography.titleMedium)
       Text(
         "1. Install ALVR on your PC and start it.\n" +
-        "2. Put the phone in the same Wi-Fi network (or connect USB with ADB).\n" +
-        "3. Press Start waiting. ALVR connects to the phone.\n" +
-        "4. In ALVR, trust the new device and choose your stream settings.\n" +
-        "5. Put the phone in a viewer and press Open VR when streaming starts.",
+          "2. Put the phone in the same Wi-Fi network (or connect USB with ADB).\n" +
+          "3. The app starts listening automatically. ALVR connects to the phone.\n" +
+          "4. In ALVR, trust the new device and choose your stream settings.\n" +
+          "5. Put the phone in a viewer and press Open VR when streaming starts.",
       )
       Text(
         "Wired mode: set ALVR → Connection → Wired Client Type → Custom to " +
-          "dev.phonealvr.client (the debug build uses dev.phonealvr.client.debug).",
+          "dev.phonealvr.client. Keep this app in the foreground so ALVR can see the " +
+          "client activity; enable Wired Client Autolaunch if you want ALVR to start it.",
+        style = MaterialTheme.typography.bodySmall,
+      )
+      Text(
+        "For long sessions, set Android Settings → Apps → PhoneALVR → Battery to " +
+          "Unrestricted so the vendor power manager does not kill the listener.",
         style = MaterialTheme.typography.bodySmall,
       )
     }
@@ -352,6 +322,7 @@ private fun SettingsDialog(
   onDismiss: () -> Unit,
   onSave: (AppSettings) -> Unit,
   onScan: () -> Unit,
+  onExport: () -> Unit,
 ) {
   var draft by remember(initial) { mutableStateOf(initial) }
   var capWidth by
@@ -399,20 +370,7 @@ private fun SettingsDialog(
         }
         item {
           Text(
-            "Refresh rate: " + (draft.refreshRateHz?.let { "%.0f Hz".format(it) } ?: "automatic"),
-          )
-          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(null, 60f, 72f, 90f, 120f).forEach { rate ->
-              AssistChip(
-                onClick = { draft = draft.copy(refreshRateHz = rate) },
-                label = { Text(rate?.let { "%.0f".format(it) } ?: "Auto") },
-              )
-            }
-          }
-        }
-        item {
-          Text(
-            "Resolution cap per eye (blank = native panel). Resolution and refresh changes apply on the next session start.",
+            "Resolution cap per eye (blank = native panel). Resolution changes apply on the next session start.",
             style = MaterialTheme.typography.bodySmall,
           )
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -436,11 +394,6 @@ private fun SettingsDialog(
         }
         item {
           SwitchRow("Debug HUD", draft.debugOverlay) { draft = draft.copy(debugOverlay = it) }
-        }
-        item {
-          SwitchRow("Prefer wired setup", draft.preferWired) {
-            draft = draft.copy(preferWired = it)
-          }
         }
         item {
           SwitchRow("Opt-in crash reporting", draft.crashReporting) {
@@ -537,6 +490,14 @@ private fun SettingsDialog(
             },
           ) {
             Text("Apply manual profile")
+          }
+        }
+        item {
+          HorizontalDivider()
+          OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
+            Icon(Icons.Default.Share, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Export diagnostics")
           }
         }
       }

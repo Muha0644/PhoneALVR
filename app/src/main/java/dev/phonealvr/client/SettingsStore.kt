@@ -7,7 +7,6 @@ data class AppSettings(
   val brightness: Float = 1f,
   val vignette: Float = 0f,
   val chromaticAberration: Float = 0f,
-  val refreshRateHz: Float? = null,
   val resolutionCapWidth: Int = 0,
   val resolutionCapHeight: Int = 0,
   val debugOverlay: Boolean = false,
@@ -22,7 +21,7 @@ data class AppSettings(
     root.put("brightness", brightness.toDouble())
     root.put("vignette", vignette.toDouble())
     root.put("chromatic_aberration", chromaticAberration.toDouble())
-    root.put("refresh_rate_hz", refreshRateHz?.toDouble() ?: JSONObject.NULL)
+    root.put("refresh_rate_hz", JSONObject.NULL)
     if (resolutionCapWidth > 0 && resolutionCapHeight > 0) {
       root.put(
         "resolution_cap",
@@ -49,7 +48,6 @@ object SettingsStore {
   private const val KEY_BRIGHTNESS = "brightness"
   private const val KEY_VIGNETTE = "vignette"
   private const val KEY_CA = "chromatic_aberration"
-  private const val KEY_REFRESH = "refresh_rate_hz"
   private const val KEY_CAP_WIDTH = "resolution_cap_width"
   private const val KEY_CAP_HEIGHT = "resolution_cap_height"
   private const val KEY_DEBUG = "debug_overlay"
@@ -65,7 +63,6 @@ object SettingsStore {
       brightness = prefs.getFloat(KEY_BRIGHTNESS, 1f),
       vignette = prefs.getFloat(KEY_VIGNETTE, 0f),
       chromaticAberration = prefs.getFloat(KEY_CA, 0f),
-      refreshRateHz = if (prefs.contains(KEY_REFRESH)) prefs.getFloat(KEY_REFRESH, 0f) else null,
       resolutionCapWidth = prefs.getInt(KEY_CAP_WIDTH, 0),
       resolutionCapHeight = prefs.getInt(KEY_CAP_HEIGHT, 0),
       debugOverlay = prefs.getBoolean(KEY_DEBUG, false),
@@ -84,13 +81,6 @@ object SettingsStore {
       .putFloat(KEY_BRIGHTNESS, settings.brightness)
       .putFloat(KEY_VIGNETTE, settings.vignette)
       .putFloat(KEY_CA, settings.chromaticAberration)
-      .apply {
-        if (settings.refreshRateHz != null) {
-          putFloat(KEY_REFRESH, settings.refreshRateHz)
-        } else {
-          remove(KEY_REFRESH)
-        }
-      }
       .putInt(KEY_CAP_WIDTH, settings.resolutionCapWidth)
       .putInt(KEY_CAP_HEIGHT, settings.resolutionCapHeight)
       .putBoolean(KEY_DEBUG, settings.debugOverlay)

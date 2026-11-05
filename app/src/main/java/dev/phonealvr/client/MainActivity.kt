@@ -23,7 +23,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
   private var settings by mutableStateOf(AppSettings())
-  private var network by mutableStateOf(NetworkInfo(Build.MODEL, emptyList()))
+  private var network by
+    mutableStateOf(NetworkInfo("${Build.MANUFACTURER} ${Build.MODEL}".trim(), emptyList()))
 
   private val notificationPermission =
     registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
     }
 
     lifecycleScope.launch { network = NetworkInfoProvider.load() }
+    ensureSessionStarted()
   }
 
   override fun onResume() {
@@ -80,16 +82,22 @@ class MainActivity : ComponentActivity() {
     settings = SettingsStore.load(this)
     SessionRepository.startPolling()
     lifecycleScope.launch { network = NetworkInfoProvider.load() }
+    // ALVR wired autolaunch starts this activity with `monkey`; make sure the
+    // listener is running and the app is advertising as soon as we are resumed.
+    ensureSessionStarted()
+  }
+
+  private fun ensureSessionStarted(): Boolean {
+    if (!SessionRepository.start(this)) {
+      toast("Could not start the native session; check logcat tag PhoneALVR")
+      return false
+    }
+    ContextCompat.startForegroundService(this, SessionService.startIntent(this))
+    return true
   }
 
   private fun startSession() {
-    requestNotificationPermission()
-    if (!SessionRepository.start(this)) {
-      toast("Could not start the native session; check logcat tag PhoneALVR")
-      return
-    }
-    ContextCompat.startForegroundService(this, SessionService.startIntent(this))
-    startActivity(Intent(this, VrActivity::class.java))
+    ensureSessionStarted()
   }
 
   private fun stopSession() {

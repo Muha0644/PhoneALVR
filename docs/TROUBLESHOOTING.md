@@ -118,7 +118,7 @@ adb logcat -s PhoneALVR PhoneALVR-Render
 
 1. `adb devices` must list the phone as `device`.
 2. ALVR → **Connection → Wired Client Type → Custom** must equal the app ID:
-   `dev.phonealvr.client`, or `dev.phonealvr.client.debug` for a debug APK.
+   `dev.phonealvr.client`
 3. Optional: enable **Wired Client Autolaunch**.
 4. Deprecated fallback:
 

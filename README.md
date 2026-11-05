@@ -77,8 +77,9 @@ instructions.
 6. Put the phone into the viewer. Tap the status overlay or press volume-down
    to recenter.
 
-The waiting screen shows the phone hostname, LAN IPs and ports `9943`
-(control) and `9944` (stream). If discovery does not find the phone, add it by
+The waiting screen shows the phone model, LAN IPs and ports `9943`
+(control) and `9944` (stream). ALVR assigns the phone a generated hostname in
+its dashboard; match it by the LAN/IP shown in the app. If discovery does not find the phone, add it by
 LAN IP in ALVR: **Connection → Add device → IP**.
 
 ### Wired / USB (ALVR native wired mode)
@@ -89,8 +90,7 @@ PC.
 
 1. Enable USB debugging and authorize the PC.
 2. In ALVR: **Connection → Wired Client Type → Custom** and set the package
-   name to `dev.phonealvr.client` (`dev.phonealvr.client.debug` for a debug
-   build). Optionally enable **Wired Client Autolaunch**.
+   name to `dev.phonealvr.client`. Optionally enable **Wired Client Autolaunch**.
 3. Connect the USB cable and start waiting in PhoneALVR.
 
 The deprecated manual fallback still works:

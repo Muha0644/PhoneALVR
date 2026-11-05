@@ -27,13 +27,12 @@ class SettingsJsonTest {
         resolutionCapWidth = 1184,
         resolutionCapHeight = 1056,
         debugOverlay = true,
-        refreshRateHz = 90f,
       )
     val json = JSONObject(settings.toNativeJson())
     assertEquals("http://google.com/cardboard/cfg?p=abc", json.getString("viewer_profile"))
     assertEquals(1184, json.getJSONObject("resolution_cap").getInt("width"))
     assertEquals(1056, json.getJSONObject("resolution_cap").getInt("height"))
-    assertEquals(90.0, json.getDouble("refresh_rate_hz"), 0.0)
+    assertTrue(json.isNull("refresh_rate_hz"))
     assertTrue(json.getBoolean("debug_overlay"))
   }
 

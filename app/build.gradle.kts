@@ -30,7 +30,6 @@ android {
 
   buildTypes {
     debug {
-      applicationIdSuffix = ".debug"
       versionNameSuffix = "-debug"
       ndk { abiFilters += listOf("x86_64") }
     }

@@ -2,26 +2,16 @@ package dev.phonealvr.client
 
 import android.os.Build
 import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.NetworkInterface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class NetworkInfo(
-  val hostname: String,
+  val deviceName: String,
   val addresses: List<String>,
   val controlPort: Int = 9943,
   val streamPort: Int = 9944,
-) {
-  fun describe(): String = buildString {
-    appendLine("PhoneALVR waiting")
-    appendLine("Hostname: $hostname")
-    appendLine("LAN IPs: ${addresses.joinToString().ifEmpty { "none" }}")
-    appendLine("Control port: $controlPort")
-    appendLine("Stream port: $streamPort")
-    appendLine("In ALVR: Connection → Add device → enter one of the LAN IPs.")
-  }
-}
+)
 
 object NetworkInfoProvider {
   suspend fun load(): NetworkInfo =
@@ -37,7 +27,7 @@ object NetworkInfoProvider {
           }
         }
       }
-      val hostname = runCatching { InetAddress.getLocalHost().hostName }.getOrNull() ?: Build.MODEL
-      NetworkInfo(hostname = hostname, addresses = addresses.distinct())
+      val deviceName = "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+      NetworkInfo(deviceName = deviceName, addresses = addresses.distinct())
     }
 }

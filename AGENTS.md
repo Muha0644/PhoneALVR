@@ -44,7 +44,7 @@ missing, run `make core` first.
 - Rust `1.88.0` (`rust-toolchain.toml`)
 - Gradle 8.10.2, AGP 8.7.3, Kotlin 2.0.21 (`gradle/`)
 - NDK r27c, cargo-ndk 3.5.4 (`scripts/`)
-- App ID `dev.phonealvr.client`, debug suffix `.debug`
+- App ID `dev.phonealvr.client` for debug and release (wired-mode identity)
 
 Bump pins in the same change as `docs/COMPATIBILITY.md`, the ADR and the
 workflows. Do not introduce a local ALVR patch file.

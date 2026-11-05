@@ -24,6 +24,21 @@ Semantic Versioning once a 1.0 release exists.
 - Documentation: README, BUILD, architecture, compatibility, troubleshooting,
   manual test plan and ADRs for the OPEN decisions.
 
+### Changed
+
+- Debug and release now share the application ID `dev.phonealvr.client` so ALVR
+  wired mode/autolaunch identifies the client consistently.
+- The listener starts automatically when the app is resumed; ALVR wired
+  autolaunch no longer leaves the app idle.
+- Settings moved to the top bar; diagnostics is now an action inside the
+  settings dialog. Removed the duplicate session-settings card, the refresh-rate
+  selector, and the copy-addresses button.
+- The connection card shows the device model instead of the misleading
+  `localhost` hostname.
+- Decoder configuration now passes the real encoded size to MediaCodec instead
+  of ALVR's 512x1024 placeholder, fixing the `ErrorUnknown` reconnect loop on
+  some phones.
+
 ### Known gaps
 
 - End-to-end streaming on a physical phone has not yet been recorded.
