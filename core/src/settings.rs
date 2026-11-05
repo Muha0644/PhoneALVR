@@ -58,6 +58,10 @@ pub struct Settings {
     pub vignette: f32,
     /// Optional lateral chromatic-aberration correction, 0.0..=0.05.
     pub chromatic_aberration: f32,
+    /// Eye-separation override in millimetres. 0 means "use the viewer profile".
+    /// Lens spacing and human IPD are not always the same; this lets the user
+    /// correct convergence without editing the QR profile.
+    pub ipd_mm: f32,
     pub debug_overlay: bool,
     pub prefer_wired: bool,
     /// Opt-in only. No endpoint is hardcoded.
@@ -75,6 +79,7 @@ impl Default for Settings {
             brightness: 1.0,
             vignette: 0.0,
             chromatic_aberration: 0.0,
+            ipd_mm: 0.0,
             debug_overlay: false,
             prefer_wired: false,
             crash_reporting: false,
@@ -115,6 +120,11 @@ impl Settings {
         };
         self.chromatic_aberration = if self.chromatic_aberration.is_finite() {
             self.chromatic_aberration.clamp(0.0, 0.05)
+        } else {
+            0.0
+        };
+        self.ipd_mm = if self.ipd_mm.is_finite() && (40.0..=80.0).contains(&self.ipd_mm) {
+            self.ipd_mm
         } else {
             0.0
         };
@@ -203,6 +213,7 @@ mod tests {
             brightness: 0.5,
             vignette: 0.25,
             chromatic_aberration: 0.01,
+            ipd_mm: 64.0,
             debug_overlay: true,
             prefer_wired: true,
             crash_reporting: false,
@@ -213,6 +224,7 @@ mod tests {
         assert_eq!(decoded.resolution_cap, Some(Resolution::new(992, 992)));
         assert_eq!(decoded.server.as_deref(), Some("192.0.2.2"));
         assert!(decoded.debug_overlay);
+        assert_eq!(decoded.ipd_mm, 64.0);
     }
 
     #[test]

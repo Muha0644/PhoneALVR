@@ -30,7 +30,7 @@ use phonealvr_render::texture::create_external_texture;
 use phonealvr_render::{
     ExternalTexture, FoveatedShaderParams, FrameParams, StereoRenderer, TextureKind,
 };
-use phonealvr_viewer::{build_eye_mesh, EyeMapper, FoveatedConfig, FoveatedEncoding};
+use phonealvr_viewer::{build_eye_mesh, EyeMapper, FoveatedConfig, FoveatedEncoding, Mesh};
 use std::{
     cell::RefCell,
     ffi::c_void,
@@ -170,6 +170,26 @@ pub fn initialize(display: DisplayInfo) -> Result<(), String> {
     Ok(())
 }
 
+/// Build one mesh per eye. The viewer's lenses sit `inter_lens_distance`
+/// apart, which is usually not the centre of each screen half; the distortion
+/// centre must follow the lens or the virtual image centres sit too far apart
+/// and the eyes cannot converge.
+fn build_stereo_meshes(
+    profile: &phonealvr_viewer::ViewerProfile,
+    display: DisplayInfo,
+) -> [Mesh; 2] {
+    let width_m = display.physical_width_m().max(0.05);
+    let lens_offset = (profile.inter_lens_distance / width_m).clamp(0.1, 0.5);
+    let mut left = EyeMapper::from_profile(profile);
+    left.lens_center_uv = [1.0 - lens_offset, 0.5];
+    let mut right = EyeMapper::from_profile(profile);
+    right.lens_center_uv = [lens_offset, 0.5];
+    [
+        build_eye_mesh(&left, MESH_COLUMNS, MESH_ROWS),
+        build_eye_mesh(&right, MESH_COLUMNS, MESH_ROWS),
+    ]
+}
+
 pub fn handle_actions(actions: &[Action]) {
     let guard = alvr_lock();
     let Some(state) = guard.as_ref() else {
@@ -285,17 +305,27 @@ pub fn surface_created(env: &mut JNIEnv, surface: &JObject) -> bool {
         }
     };
 
-    let profile = lock_runtime()
-        .as_ref()
-        .map(|runtime| runtime.profile().clone())
-        .unwrap_or_default();
-    let foveated = lock_runtime()
-        .as_ref()
-        .and_then(|runtime| runtime.foveated_encoding());
-    let mapper = EyeMapper::from_profile(&profile);
-    let mesh = build_eye_mesh(&mapper, MESH_COLUMNS, MESH_ROWS);
-    if let Err(error) = renderer.upload_mesh(&gl, &mesh) {
-        log::error!("mesh upload failed: {error}");
+    let (profile, display, foveated) = {
+        let guard = lock_runtime();
+        (
+            guard
+                .as_ref()
+                .map(|runtime| runtime.profile().clone())
+                .unwrap_or_default(),
+            guard
+                .as_ref()
+                .map(|runtime| runtime.display())
+                .unwrap_or(DisplayInfo::new(1, 1, 60.0)),
+            guard
+                .as_ref()
+                .and_then(|runtime| runtime.foveated_encoding()),
+        )
+    };
+    let meshes = build_stereo_meshes(&profile, display);
+    for (eye, mesh) in meshes.iter().enumerate() {
+        if let Err(error) = renderer.upload_mesh(&gl, eye, mesh) {
+            log::error!("mesh upload failed: {error}");
+        }
     }
     renderer.set_foveated(foveated.map(FoveatedShaderParams::from));
     let tan = profile.fov.tan_extents();
@@ -376,7 +406,7 @@ pub fn render_frame() {
         }
 
         if MESH_DIRTY.swap(false, Ordering::Relaxed) {
-            let (profile, foveated) = {
+            let (profile, display, foveated) = {
                 let guard = lock_runtime();
                 (
                     guard
@@ -385,13 +415,18 @@ pub fn render_frame() {
                         .unwrap_or_default(),
                     guard
                         .as_ref()
+                        .map(|runtime| runtime.display())
+                        .unwrap_or(DisplayInfo::new(1, 1, 60.0)),
+                    guard
+                        .as_ref()
                         .and_then(|runtime| runtime.foveated_encoding()),
                 )
             };
-            let mapper = EyeMapper::from_profile(&profile);
-            let mesh = build_eye_mesh(&mapper, MESH_COLUMNS, MESH_ROWS);
-            if let Err(error) = state.renderer.upload_mesh(&state.gl, &mesh) {
-                log::error!("mesh upload failed: {error}");
+            let meshes = build_stereo_meshes(&profile, display);
+            for (eye, mesh) in meshes.iter().enumerate() {
+                if let Err(error) = state.renderer.upload_mesh(&state.gl, eye, mesh) {
+                    log::error!("mesh upload failed: {error}");
+                }
             }
             state
                 .renderer
@@ -601,6 +636,15 @@ fn handle_event(context: &Arc<ClientCoreContext>, decoder: &DecoderSlot, event: 
                 runtime.on_handshake_succeeded(20);
                 runtime.on_stream_started(base_width, base_height, refresh, 20);
                 runtime.set_foveated_encoding(foveated);
+                let params = runtime.view_params();
+                let separation_mm = (params.0[1].position[0] - params.0[0].position[0]) * 1000.0;
+                log::info!(
+                    "stereo: eye separation {separation_mm:.1} mm, FOV {:.0}/{:.0}/{:.0}/{:.0} deg",
+                    params.0[0].fov.left.to_degrees(),
+                    params.0[0].fov.right.to_degrees(),
+                    params.0[0].fov.up.to_degrees(),
+                    params.0[0].fov.down.to_degrees(),
+                );
                 if base_width > native.width || base_height > native.height {
                     let warning = format!(
                         "Stream {base_width}x{base_height} per eye exceeds the panel's {native_width}x{native_height}. Set ALVR Video → Resolution to Scale 1.0 or lower.",

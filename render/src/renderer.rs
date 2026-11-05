@@ -501,13 +501,36 @@ unsafe fn compile(
     Ok(shader)
 }
 
+unsafe fn create_eye_objects(
+    gl: &glow::Context,
+) -> Result<(glow::VertexArray, glow::Buffer, glow::Buffer), RenderError> {
+    let vao = gl
+        .create_vertex_array()
+        .map_err(|_| RenderError::Program("glGenVertexArrays failed".into()))?;
+    let vbo = gl
+        .create_buffer()
+        .map_err(|_| RenderError::Program("glGenBuffers failed".into()))?;
+    let ebo = gl
+        .create_buffer()
+        .map_err(|_| RenderError::Program("glGenBuffers failed".into()))?;
+    gl.bind_vertex_array(Some(vao));
+    gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+    gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
+    gl.enable_vertex_attrib_array(0);
+    gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
+    gl.enable_vertex_attrib_array(1);
+    gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
+    gl.bind_vertex_array(None);
+    Ok((vao, vbo, ebo))
+}
+
 pub struct StereoRenderer {
     program_2d: Program,
     program_external: Option<Program>,
-    vao: glow::VertexArray,
-    vbo: glow::Buffer,
-    ebo: glow::Buffer,
-    index_count: i32,
+    vaos: [glow::VertexArray; 2],
+    vbos: [glow::Buffer; 2],
+    ebos: [glow::Buffer; 2],
+    index_counts: [i32; 2],
     width: i32,
     height: i32,
     foveated: Option<FoveatedShaderParams>,
@@ -522,31 +545,15 @@ impl StereoRenderer {
         let program_external = None;
 
         unsafe {
-            let vao = gl
-                .create_vertex_array()
-                .map_err(|_| RenderError::Program("glGenVertexArrays failed".into()))?;
-            let vbo = gl
-                .create_buffer()
-                .map_err(|_| RenderError::Program("glGenBuffers failed".into()))?;
-            let ebo = gl
-                .create_buffer()
-                .map_err(|_| RenderError::Program("glGenBuffers failed".into()))?;
-            gl.bind_vertex_array(Some(vao));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(ebo));
-            gl.enable_vertex_attrib_array(0);
-            gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 16, 0);
-            gl.enable_vertex_attrib_array(1);
-            gl.vertex_attrib_pointer_f32(1, 2, glow::FLOAT, false, 16, 8);
-            gl.bind_vertex_array(None);
-
+            let (vao_left, vbo_left, ebo_left) = create_eye_objects(gl)?;
+            let (vao_right, vbo_right, ebo_right) = create_eye_objects(gl)?;
             Ok(Self {
                 program_2d,
                 program_external,
-                vao,
-                vbo,
-                ebo,
-                index_count: 0,
+                vaos: [vao_left, vao_right],
+                vbos: [vbo_left, vbo_right],
+                ebos: [ebo_left, ebo_right],
+                index_counts: [0; 2],
                 width: 1,
                 height: 1,
                 foveated: None,
@@ -574,8 +581,18 @@ impl StereoRenderer {
         }
     }
 
-    /// Upload a new distortion mesh. Called on profile or display changes.
-    pub fn upload_mesh(&mut self, gl: &glow::Context, mesh: &Mesh) -> Result<(), RenderError> {
+    /// Upload the distortion mesh for one eye. Called on profile/display
+    /// changes. The eyes have different lens centres, so each needs its own
+    /// mesh.
+    pub fn upload_mesh(
+        &mut self,
+        gl: &glow::Context,
+        eye: usize,
+        mesh: &Mesh,
+    ) -> Result<(), RenderError> {
+        if eye >= 2 {
+            return Err(RenderError::NoMesh);
+        }
         let mut vertices = Vec::with_capacity(mesh.positions.len() * 4);
         for (position, uv) in mesh.positions.iter().zip(mesh.tex_coords.iter()) {
             vertices.extend_from_slice(&[position[0], position[1], uv[0], uv[1]]);
@@ -594,15 +611,15 @@ impl StereoRenderer {
         };
 
         unsafe {
-            gl.bind_vertex_array(Some(self.vao));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
+            gl.bind_vertex_array(Some(self.vaos[eye]));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbos[eye]));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertex_bytes, glow::STATIC_DRAW);
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ebo));
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.ebos[eye]));
             gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, index_bytes, glow::STATIC_DRAW);
             gl.bind_vertex_array(None);
         }
 
-        self.index_count = mesh.indices.len() as i32;
+        self.index_counts[eye] = mesh.indices.len() as i32;
         Ok(())
     }
 
@@ -619,7 +636,7 @@ impl StereoRenderer {
         kind: TextureKind,
         params: FrameParams,
     ) -> Result<(), RenderError> {
-        if self.index_count == 0 {
+        if self.index_counts.contains(&0) {
             return Err(RenderError::NoMesh);
         }
         let params = params.sanitized();
@@ -633,8 +650,6 @@ impl StereoRenderer {
             params.background[3],
         );
         gl.clear(glow::COLOR_BUFFER_BIT);
-        gl.bind_vertex_array(Some(self.vao));
-
         let eye_width = (self.width / 2).max(1);
         let program = match kind {
             TextureKind::External => self.program_external.as_ref().unwrap_or(&self.program_2d),
@@ -650,9 +665,15 @@ impl StereoRenderer {
                 TextureKind::External => gl.bind_texture(EXTERNAL_OES, Some(*texture)),
                 TextureKind::Rgba => gl.bind_texture(glow::TEXTURE_2D, Some(*texture)),
             }
+            gl.bind_vertex_array(Some(self.vaos[eye]));
             program.use_program(gl);
             program.set_params(gl, params, uv_scale, uv_offset, self.foveated.as_ref(), eye);
-            gl.draw_elements(glow::TRIANGLES, self.index_count, glow::UNSIGNED_INT, 0);
+            gl.draw_elements(
+                glow::TRIANGLES,
+                self.index_counts[eye],
+                glow::UNSIGNED_INT,
+                0,
+            );
         }
 
         gl.bind_vertex_array(None);
@@ -670,10 +691,12 @@ impl StereoRenderer {
         if let Some(program) = &self.program_external {
             gl.delete_program(program.program);
         }
-        gl.delete_vertex_array(self.vao);
-        gl.delete_buffer(self.vbo);
-        gl.delete_buffer(self.ebo);
-        self.index_count = 0;
+        for eye in 0..2 {
+            gl.delete_vertex_array(self.vaos[eye]);
+            gl.delete_buffer(self.vbos[eye]);
+            gl.delete_buffer(self.ebos[eye]);
+            self.index_counts[eye] = 0;
+        }
     }
 }
 

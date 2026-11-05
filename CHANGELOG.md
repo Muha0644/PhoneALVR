@@ -59,6 +59,13 @@ Semantic Versioning once a 1.0 release exists.
   UI. This fixes inverted yaw/pitch when the phone is used in landscape.
 - New Settings → Screen orientation option (Auto, portrait, landscape, reverse
   variants) that locks the home and VR activities to the chosen orientation.
+- New IPD override setting (millimetres, blank = viewer profile). Lens spacing
+  from a QR profile is not always the user's eye separation; the effective
+  separation is also logged at stream start.
+- Each eye now has its own distortion mesh with the lens centre derived from
+  the panel DPI and the profile's lens spacing. Previously both images were
+  centred on the half-screen, which shifted the virtual image centres several
+  millimetres apart and made convergence uncomfortable on wide phones.
 - The render thread is now paced solely by `eglSwapBuffers` vsync instead of a
   software timer plus vsync, which was halving frame consumption and backing up
   the decoder. Empty frames are no longer swapped.

@@ -82,6 +82,7 @@ object SessionRepository {
           metrics.widthPixels,
           metrics.heightPixels,
           refresh,
+          metrics.xdpi,
           AlvrContext(context.applicationContext),
           initialSettings.toNativeJson(),
         )

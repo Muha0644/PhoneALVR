@@ -48,6 +48,7 @@ pub extern "system" fn Java_dev_phonealvr_client_NativeSession_nativeCreate(
     width: jint,
     height: jint,
     refresh_hz: jfloat,
+    xdpi: jfloat,
     android_context: JObject,
     settings_json: JString,
 ) -> jboolean {
@@ -58,7 +59,12 @@ pub extern "system" fn Java_dev_phonealvr_client_NativeSession_nativeCreate(
     } else {
         60.0
     };
-    let display = DisplayInfo::new(width, height, refresh_hz);
+    let xdpi = if xdpi.is_finite() && xdpi > 50.0 {
+        xdpi
+    } else {
+        400.0
+    };
+    let display = DisplayInfo::with_dpi(width, height, refresh_hz, xdpi);
 
     // ndk_context keeps the raw jobject for the lifetime of the session.
     // A local reference would be invalid after this call, so promote it to a

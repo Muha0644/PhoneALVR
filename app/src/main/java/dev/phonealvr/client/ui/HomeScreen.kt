@@ -361,6 +361,8 @@ private fun SettingsDialog(
   var manualK1 by remember { mutableStateOf("0.441") }
   var manualK2 by remember { mutableStateOf("0.156") }
   var orientationMenu by remember { mutableStateOf(false) }
+  var ipdOverride by
+    remember(initial) { mutableStateOf(initial.ipdMm.takeIf { it > 0f }?.toString() ?: "") }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -442,6 +444,23 @@ private fun SettingsDialog(
               }
             }
           }
+        }
+        item {
+          Text("IPD override (mm)")
+          Text(
+            "Blank uses the viewer profile's lens spacing. Lens spacing and eye separation differ; try 60–66 mm if the stereo image feels too wide.",
+            style = MaterialTheme.typography.bodySmall,
+          )
+          OutlinedTextField(
+            value = ipdOverride,
+            onValueChange = { value ->
+              ipdOverride = value.filter { c -> c.isDigit() || c == '.' }
+            },
+            label = { Text("0 = viewer profile") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+            modifier = Modifier.width(180.dp),
+          )
         }
         item {
           SwitchRow("Debug HUD", draft.debugOverlay) { draft = draft.copy(debugOverlay = it) }
@@ -571,6 +590,7 @@ private fun SettingsDialog(
             draft.copy(
               resolutionCapWidth = if (complete) width else 0,
               resolutionCapHeight = if (complete) height else 0,
+              ipdMm = ipdOverride.toFloatOrNull()?.takeIf { it > 0f } ?: 0f,
             ),
           )
         },

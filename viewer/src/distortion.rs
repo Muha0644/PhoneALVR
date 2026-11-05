@@ -171,9 +171,13 @@ impl EyeMapper {
             relative
         };
 
+        // Distortion is measured from the lens centre, but the source eye
+        // image is centred on the eye's view direction (0.5, 0.5). Do not add
+        // the lens offset back: the output lens centre must sample the source
+        // image centre, otherwise the virtual image centres sit apart by the
+        // lens offset and the eyes diverge.
         let distorted = self.distortion.distort_tan(relative[0], relative[1]);
-        let source_tan = [distorted[0] + center_tan[0], distorted[1] + center_tan[1]];
-        let uv = tan_fov.tan_to_uv(source_tan);
+        let uv = tan_fov.tan_to_uv(distorted);
         [uv[0].clamp(0.0, 1.0), uv[1].clamp(0.0, 1.0)]
     }
 
@@ -249,6 +253,16 @@ mod tests {
         let opposite = mapper.source_uv([0.2, 0.5]);
         assert!(opposite[0] < 0.2);
         assert!(opposite[0] >= 0.0);
+    }
+
+    #[test]
+    fn lens_centre_maps_to_texture_centre() {
+        let profile = ViewerProfile::cardboard_v1();
+        let mut mapper = EyeMapper::from_profile(&profile);
+        mapper.lens_center_uv = [0.6, 0.5];
+        let uv = mapper.source_uv([0.6, 0.5]);
+        assert!(approx(uv[0], 0.5, 1e-5), "{uv:?}");
+        assert!(approx(uv[1], 0.5, 1e-5), "{uv:?}");
     }
 
     #[test]

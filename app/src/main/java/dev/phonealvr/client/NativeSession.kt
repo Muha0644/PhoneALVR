@@ -24,6 +24,7 @@ class NativeSession private constructor() {
       width: Int,
       height: Int,
       refreshHz: Float,
+      xdpi: Float,
       context: Context,
       settingsJson: String,
     ): Boolean

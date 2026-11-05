@@ -131,6 +131,11 @@ zero-copy.
 - `EyeMapper` maps an output pixel to the source texture coordinate.
 - `build_eye_mesh` samples the mapper on a 40×32 grid; the mesh is rebuilt only
   when the profile or display changes.
+- The two eyes have separate meshes. Their lens centres are computed from the
+  panel's physical width (`DisplayMetrics.xdpi`) and the profile's lens
+  spacing, because the lenses are normally inset from the half-screen centres.
+  The source image centre maps to the lens centre, so the virtual image centres
+  sit under the lenses.
 - Projection matrices are asymmetric and derived from the same FOV.
 
 The math is unit-tested with known Cardboard coefficients and with mesh

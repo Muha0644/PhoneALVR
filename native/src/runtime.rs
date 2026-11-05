@@ -16,6 +16,9 @@ pub struct DisplayInfo {
     pub width: u32,
     pub height: u32,
     pub refresh_hz: f32,
+    /// Physical horizontal DPI of the panel, used to convert the viewer's
+    /// millimetre lens spacing into screen coordinates.
+    pub xdpi: f32,
 }
 
 impl DisplayInfo {
@@ -24,7 +27,27 @@ impl DisplayInfo {
             width,
             height,
             refresh_hz,
+            xdpi: 400.0,
         }
+    }
+
+    pub const fn with_dpi(width: u32, height: u32, refresh_hz: f32, xdpi: f32) -> Self {
+        Self {
+            width,
+            height,
+            refresh_hz,
+            xdpi,
+        }
+    }
+
+    /// Long dimension of the panel in metres (landscape width).
+    pub fn physical_width_m(self) -> f32 {
+        let dpi = if self.xdpi.is_finite() && self.xdpi > 50.0 {
+            self.xdpi
+        } else {
+            400.0
+        };
+        self.width.max(self.height) as f32 / dpi * 0.0254
     }
 
     /// Side-by-side layout: each eye gets half of the long side and all of the
@@ -53,7 +76,7 @@ impl Runtime {
     pub fn new(display: DisplayInfo) -> Self {
         let settings = Settings::default();
         let profile = ViewerProfile::cardboard_v1();
-        let view_params = view_params_for(&profile);
+        let view_params = view_params_for(&profile, 0.0);
         Self {
             session: Session::new(),
             settings,
@@ -204,7 +227,7 @@ impl Runtime {
 
         self.settings = settings;
         self.profile = profile;
-        self.view_params = view_params_for(&self.profile);
+        self.view_params = view_params_for(&self.profile, self.settings.ipd_mm);
         self.dedup.invalidate();
         Ok(())
     }
@@ -213,7 +236,7 @@ impl Runtime {
     pub fn set_viewer_profile(&mut self, profile: ViewerProfile) -> Result<(), String> {
         let profile = profile.validate().map_err(|error| error.to_string())?;
         self.profile = profile;
-        self.view_params = view_params_for(&self.profile);
+        self.view_params = view_params_for(&self.profile, self.settings.ipd_mm);
         self.dedup.invalidate();
         Ok(())
     }
@@ -330,8 +353,15 @@ impl Runtime {
     }
 }
 
-pub fn view_params_for(profile: &ViewerProfile) -> ViewParams {
-    let half_ipd = profile.inter_lens_distance * 0.5;
+/// `ipd_override_mm` is 0 to use the viewer profile. Lens spacing and human
+/// IPD can differ, and convergence is sensitive to the difference.
+pub fn view_params_for(profile: &ViewerProfile, ipd_override_mm: f32) -> ViewParams {
+    let ipd = if ipd_override_mm.is_finite() && ipd_override_mm > 0.0 {
+        ipd_override_mm / 1000.0
+    } else {
+        profile.inter_lens_distance
+    };
+    let half_ipd = ipd * 0.5;
     let fov = alvr_fov(profile.fov);
     ViewParams([
         phonealvr_core::EyeView {
@@ -373,6 +403,12 @@ mod tests {
             DisplayInfo::new(1080, 2400, 90.0).native_per_eye(),
             Resolution::new(1200, 1080)
         );
+    }
+
+    #[test]
+    fn physical_width_uses_long_side_and_dpi() {
+        let display = DisplayInfo::with_dpi(2400, 1080, 60.0, 400.0);
+        assert!((display.physical_width_m() - 0.1524).abs() < 1e-4);
     }
 
     #[test]
@@ -423,6 +459,19 @@ mod tests {
 
         runtime.on_stream_stopped();
         assert!(runtime.foveated_encoding().is_none());
+    }
+
+    #[test]
+    fn ipd_override_changes_eye_separation() {
+        let mut runtime = runtime();
+        let settings = Settings {
+            ipd_mm: 64.0,
+            ..Settings::default()
+        };
+        runtime.set_settings_json(&settings.to_json()).unwrap();
+        let params = runtime.view_params();
+        let separation = params.0[1].position[0] - params.0[0].position[0];
+        assert!((separation - 0.064).abs() < 1e-6, "{separation}");
     }
 
     #[test]

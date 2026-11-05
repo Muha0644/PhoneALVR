@@ -197,3 +197,18 @@ budget spread over 2.4× too many frames (visible pixelation).
 `enforce_server_frame_pacing` was enabled on the running streamer through its
 `/api/dashboard-request` endpoint and persisted in `session.json`.
 
+## 2026-11-05 — stereo convergence / lens centres
+
+The saved QR profile is 65 mm IPD, 50° half-FOV, 44 mm screen-to-lens. The code
+already halves the IPD twice (client eye positions and server eye transforms),
+but both eyes were rendered centred on their half-screen. On a ~152 mm-wide
+panel a 65 mm lens pair is inset about 5.5 mm per eye, so the virtual image
+centres were ~11 mm too far apart, making convergence uncomfortable despite a
+clear image.
+
+Fix: per-eye meshes with `EyeMapper::lens_center_uv` set from
+`inter_lens_distance / physical_panel_width`, and `source_uv` now maps the lens
+centre to the source image centre. `DisplayInfo` carries `xdpi` from
+`DisplayMetrics`. An IPD override (mm) is available in Settings; the effective
+separation is logged at stream start as `stereo: eye separation ... mm`.
+

@@ -16,12 +16,14 @@ data class AppSettings(
   val serverHint: String = "",
   val viewerProfile: String? = null,
   val screenOrientation: ScreenOrientation = ScreenOrientation.AUTO,
+  val ipdMm: Float = 0f,
 ) {
   fun toNativeJson(): String {
     val root = JSONObject()
     root.put("brightness", brightness.toDouble())
     root.put("vignette", vignette.toDouble())
     root.put("chromatic_aberration", chromaticAberration.toDouble())
+    root.put("ipd_mm", ipdMm.toDouble())
     root.put("refresh_rate_hz", JSONObject.NULL)
     if (resolutionCapWidth > 0 && resolutionCapHeight > 0) {
       root.put(
@@ -58,6 +60,7 @@ object SettingsStore {
   private const val KEY_SERVER = "server_hint"
   private const val KEY_VIEWER = "viewer_profile"
   private const val KEY_ORIENTATION = "screen_orientation"
+  private const val KEY_IPD_MM = "ipd_mm"
 
   fun load(context: Context): AppSettings {
     val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -77,6 +80,7 @@ object SettingsStore {
         prefs.getString(KEY_ORIENTATION, null)?.let { stored ->
           runCatching { ScreenOrientation.valueOf(stored) }.getOrNull()
         } ?: ScreenOrientation.AUTO,
+      ipdMm = prefs.getFloat(KEY_IPD_MM, 0f),
     )
   }
 
@@ -96,6 +100,7 @@ object SettingsStore {
       .putString(KEY_SERVER, settings.serverHint)
       .putString(KEY_VIEWER, settings.viewerProfile)
       .putString(KEY_ORIENTATION, settings.screenOrientation.name)
+      .putFloat(KEY_IPD_MM, settings.ipdMm)
       .apply()
   }
 
