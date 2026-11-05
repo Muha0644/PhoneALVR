@@ -33,7 +33,7 @@ use std::{
     cell::RefCell,
     ffi::c_void,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
     thread::{self, JoinHandle},
@@ -66,6 +66,7 @@ static POSE_W: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0f32
 static STREAM_VIEW_WIDTH: AtomicU32 = AtomicU32::new(0);
 static STREAM_VIEW_HEIGHT: AtomicU32 = AtomicU32::new(0);
 static FIRST_FRAME_LOGGED: AtomicBool = AtomicBool::new(false);
+static VIDEO_DROP_COUNT: AtomicU64 = AtomicU64::new(0);
 
 fn alvr_slot() -> &'static Mutex<Option<AlvrState>> {
     ALVR.get_or_init(|| Mutex::new(None))
@@ -477,6 +478,10 @@ pub fn render_frame() {
     });
 }
 
+pub fn video_drop_count() -> u64 {
+    VIDEO_DROP_COUNT.load(Ordering::Relaxed)
+}
+
 pub fn on_orientation(orientation: Quat) {
     store_f32(&POSE_X, orientation.x);
     store_f32(&POSE_Y, orientation.y);
@@ -612,7 +617,11 @@ fn handle_event(
                 });
 
             context.set_decoder_input_callback(Box::new(move |timestamp, buffer| {
-                sink.push_nal(timestamp, buffer)
+                let submitted = sink.push_nal(timestamp, buffer);
+                if !submitted {
+                    VIDEO_DROP_COUNT.fetch_add(1, Ordering::Relaxed);
+                }
+                submitted
             }));
 
             *decoder

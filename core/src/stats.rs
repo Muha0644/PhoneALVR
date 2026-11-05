@@ -96,6 +96,10 @@ impl StatsTracker {
         self.stats.dropped_frames = self.stats.dropped_frames.saturating_add(1);
     }
 
+    pub fn set_dropped_frames(&mut self, count: u64) {
+        self.stats.dropped_frames = count;
+    }
+
     /// ALVR's end-to-end pipeline estimate, in milliseconds.
     pub fn on_latency(&mut self, latency_ms: f32) {
         if latency_ms.is_finite() && latency_ms >= 0.0 {

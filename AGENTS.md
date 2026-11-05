@@ -76,6 +76,15 @@ Keep it small; update both sides together:
 JNI names are `Java_dev_phonealvr_client_NativeSession_*`; Kotlin uses a
 companion object with `@JvmStatic`.
 
+## Current blocker / next task
+
+The target phone cannot decode the full side-by-side stream; foveated encoding
+is required. Read `docs/dev/FFE_HANDOFF.md` before touching the renderer.
+`viewer/src/foveated.rs` already ports the ALVR v20.14.1 math, and
+`native/src/platform_android.rs` uses the FFE encoded resolution for
+MediaCodec. The renderer shader hookup and enabling the client capability are
+the next vertical slice.
+
 ## Tests first/with the change
 
 - State machine, settings, tracking, stats, dedup: `core/src/*` unit tests.

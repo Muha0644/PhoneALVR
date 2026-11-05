@@ -33,6 +33,9 @@ mod host {
     pub fn surface_destroyed() {}
     pub fn render_frame() {}
     pub fn on_orientation(_orientation: Quat) {}
+    pub fn video_drop_count() -> u64 {
+        0
+    }
 }
 
 #[cfg(not(target_os = "android"))]

@@ -9,12 +9,12 @@ distortion, stereo geometry, tracking prediction and the GLES renderer are
 implemented in this repository.
 
 > **Status: implementation in progress.** The Rust core, viewer math, session
-> state machine, renderer and JNI boundary are implemented. The host test suite
-> (94 Rust tests), Android cross-compilation for arm64/x86_64, Kotlin unit
-> tests, Android Lint and debug/release APK builds all pass; see
-> [`docs/VERIFICATION.md`](docs/VERIFICATION.md). End-to-end validation against a
-> physical ALVR streamer and a physical phone is the next milestone; see
-> `docs/COMPATIBILITY.md` for exactly what has and has not been exercised.
+> state machine, renderer and JNI boundary are implemented. Wired mode works on
+> a physical device. The current blocker is decoder/thermal load: the target
+> phone cannot sustain the full side-by-side stream. Foveated-encoding math and
+> decoder sizing are implemented; the renderer shader hookup is the next slice.
+> See [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) and
+> [`docs/dev/FFE_HANDOFF.md`](docs/dev/FFE_HANDOFF.md).
 
 ## What it does
 
@@ -135,6 +135,8 @@ to the built-in default in Settings.
 - [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md) — tested versions and limitations
 - [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) — connection, black screen, latency
 - [`docs/VERIFICATION.md`](docs/VERIFICATION.md) — what has actually been built and tested
+- [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) — current state and next tasks
+- [`docs/dev/FFE_HANDOFF.md`](docs/dev/FFE_HANDOFF.md) — foveated-encoding implementation plan
 - [`docs/manual-test-plan.md`](docs/manual-test-plan.md) — device/soak/reconnect checklist
 - [`docs/adr/`](docs/adr/) — architecture decisions, including every OPEN item
 - [`AGENTS.md`](AGENTS.md) — repository guide for coding agents

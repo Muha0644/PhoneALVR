@@ -101,6 +101,19 @@ copies values and delegates to `Runtime` / `platform`.
    the frame.
 7. ALVR receives `report_compositor_start` / `report_submit` for its statistics.
 
+### Foveated encoding
+
+ALVR can encode a smaller per-eye texture with a sharp centre and compressed
+edges. `viewer/src/foveated.rs` ports the ALVR v20.14.1 constants and UV
+mapping. When FFE is negotiated, `native/src/platform_android.rs` uses the FFE
+**encoded** per-eye resolution for the MediaCodec width/height instead of the
+base stream resolution, and `Runtime` stores the layout for the renderer.
+
+The renderer shader hookup is the next vertical slice: FFE is applied after
+lens distortion and before the side-by-side half selection, including ALVR's
+right-eye horizontal mirror. `ClientCapabilities.foveated_encoding` stays
+false until that shader path is verified; see `docs/dev/FFE_HANDOFF.md`.
+
 The current implementation creates one `EGLImage` per decoded frame. Moving to
 a small image pool is an M4 performance task; the decode path is already
 zero-copy.

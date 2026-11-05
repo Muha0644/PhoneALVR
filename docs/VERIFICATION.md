@@ -22,15 +22,15 @@ Result: pass.
 phonealvr-core    43 passed
 phonealvr-native  15 passed
 phonealvr-render   3 passed
-phonealvr-viewer  33 passed
-total             94 passed
+phonealvr-viewer  40 passed
+total            101 passed
 ```
 
 The suite covers the state machine and 100 start/stop cycles, reconnect and
 handshake failures, settings validation/clamping, resolution alignment, view
 param deduplication, tracking prediction/recentering/reprojection, statistics,
-Cardboard JSON and protobuf QR parsing, distortion math, mesh topology and
-projection math.
+Cardboard JSON and protobuf QR parsing, distortion math, mesh topology,
+projection math, and the ALVR v20.14.1 foveated-encoding constants/UV mapping.
 
 ### Android cross-compilation
 
@@ -76,6 +76,18 @@ Result: pass.
 - Debug APK: 86 MB (arm64-v8a + x86_64, unstripped debug symbols).
 - Release APK: 18 MB (arm64-v8a, unsigned locally).
 - APK contents: `lib/arm64-v8a/libphonealvr.so` (and x86_64 in debug).
+
+### Physical-device evidence (2026-11-05, Xiaomi 23124RA7EO)
+
+- Wired mode connects; surface/EGL/renderer start and a first frame is
+  presented.
+- 1088×960 per eye → encoded 2176×960: ~16 FPS, 4,741 `Decoder saturation`
+  and 92 `Network dropped video packet` events in 17 s; green flashes and a
+  hard reboot under load.
+- 960×864 per eye → encoded 1920×864: green flashes disappeared, but the phone
+  was still overloaded and hard-rebooted. Foveated encoding is required.
+- Decoder configuration at 2176×960 fails with `ErrorUnknown`; the phone's
+  H.264 decoder appears to max out near 1920 px encoded width.
 
 ### Not yet verified
 

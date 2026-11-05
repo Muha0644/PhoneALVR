@@ -155,8 +155,12 @@ fun HomeScreen(
       }
 
       val stream = state.stream
+      val encodedWidth = stream?.width?.times(2) ?: 0
       if (
-        stream != null && (stream.width > nativePerEyeWidth || stream.height > nativePerEyeHeight)
+        stream != null &&
+          (stream.width > nativePerEyeWidth ||
+            stream.height > nativePerEyeHeight ||
+            encodedWidth > 1920)
       ) {
         item {
           Card(
@@ -164,11 +168,17 @@ fun HomeScreen(
               CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
           ) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-              Text("Stream resolution is too large", style = MaterialTheme.typography.titleMedium)
               Text(
-                "The stream is ${stream.width}×${stream.height} per eye, but this phone's panel is " +
-                  "$nativePerEyeWidth×$nativePerEyeHeight per eye. Set ALVR → Video → Resolution " +
-                  "to Scale 1.0 (or a lower value). A stream above the panel can also fail to decode.",
+                "Stream may be too large for this decoder",
+                style = MaterialTheme.typography.titleMedium,
+              )
+              Text(
+                "The stream is ${stream.width}×${stream.height} per eye, encoded as " +
+                  "$encodedWidth×${stream.height} side-by-side. This phone's panel is " +
+                  "$nativePerEyeWidth×$nativePerEyeHeight per eye. Many phone H.264 decoders " +
+                  "max out at 1920 px encoded width; exceeding it can cause green flashes, " +
+                  "stutter and decoder restarts. Set ALVR → Video → Resolution to about " +
+                  "960×864 per eye (Scale 0.8) or lower, and lower the bitrate.",
                 style = MaterialTheme.typography.bodySmall,
               )
             }
@@ -370,7 +380,9 @@ private fun SettingsDialog(
         }
         item {
           Text(
-            "Resolution cap per eye (blank = native panel). Resolution changes apply on the next session start.",
+            "Resolution cap per eye (blank = native panel). Resolution changes apply on the next session start. " +
+              "If the image flashes green or stutters, try 960×864 per eye or lower; the encoded " +
+              "side-by-side width should stay at or below 1920.",
             style = MaterialTheme.typography.bodySmall,
           )
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

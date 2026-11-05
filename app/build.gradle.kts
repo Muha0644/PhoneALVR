@@ -1,3 +1,4 @@
+import com.diffplug.spotless.LineEnding
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -87,6 +88,7 @@ android {
 kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }
 
 spotless {
+  lineEndings = LineEnding.GIT_ATTRIBUTES
   kotlin {
     target("src/**/*.kt")
     ktfmt().googleStyle()

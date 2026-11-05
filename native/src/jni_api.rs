@@ -266,7 +266,11 @@ pub extern "system" fn Java_dev_phonealvr_client_NativeSession_nativeGetStats(
     mut env: JNIEnv,
     _class: JClass,
 ) -> jni::sys::jstring {
-    let stats = runtime_mut("{}".to_owned(), |runtime| runtime.stats_json());
+    let dropped = platform::video_drop_count();
+    let stats = runtime_mut("{}".to_owned(), |runtime| {
+        runtime.stats_mut().set_dropped_frames(dropped);
+        runtime.stats_json()
+    });
     jstring(&mut env, &stats)
 }
 

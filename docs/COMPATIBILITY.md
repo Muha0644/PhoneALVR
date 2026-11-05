@@ -51,9 +51,13 @@ larger than the panel.
 - 3DoF only. No 6DoF, controllers, hand/eye tracking or microphone passthrough.
 - No Vulkan renderer; GLES 3.0 only.
 - No compatibility shim for ALVR releases other than v20.14.1.
-- Foveated encoding, 10-bit and HDR are not negotiated in v1; the client
-  advertises 8-bit SDR and no foveation. Upscaling settings are accepted but
-  ignored.
+- Foveated encoding is required for the target phone, but the **renderer shader
+  hookup is still pending**. The math/config groundwork is implemented; the
+  client currently advertises no foveation until that is verified.
+- 10-bit and HDR are not negotiated in v1; the client advertises 8-bit SDR.
+  Upscaling settings are accepted but ignored.
+- The target phone's H.264 decoder appears to max out near 1920 px encoded
+  width. Streams above that are overloaded even without FFE.
 - The render pacing loop is Kotlin-managed (dedicated thread); moving it fully
   into Rust is planned but not required for correctness.
 - One `EGLImage` is created per decoded frame; an image pool is an M4
