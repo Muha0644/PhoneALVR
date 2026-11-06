@@ -43,7 +43,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # v3 installs the legacy "tools" package by default; Google removed it
+      # from the SDK repository, so pin v4 and request only platform-tools.
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
@@ -87,7 +91,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      # v3 installs the legacy "tools" package by default; Google removed it
+      # from the SDK repository, so pin v4 and request only platform-tools.
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
       - uses: nttld/setup-ndk@v1
         id: ndk
         with:
